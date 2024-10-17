@@ -9,11 +9,11 @@ import numpy as np
 import pandas as pd
 from pandas.testing import assert_frame_equal
 
-from sqlglot import exp, parse_one, transpile
-from sqlglot.errors import ExecuteError
-from sqlglot.executor import execute
-from sqlglot.executor.python import Python
-from sqlglot.executor.table import Table, ensure_tables
+from hex.sqlglot import exp, parse_one, transpile
+from hex.sqlglot.errors import ExecuteError
+from hex.sqlglot.executor import execute
+from hex.sqlglot.executor.python import Python
+from hex.sqlglot.executor.table import Table, ensure_tables
 from tests.helpers import (
     FIXTURES_DIR,
     SKIP_INTEGRATION,

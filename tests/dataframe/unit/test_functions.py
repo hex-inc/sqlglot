@@ -2,9 +2,9 @@ import datetime
 import inspect
 import unittest
 
-from sqlglot import expressions as exp, parse_one
-from sqlglot.dataframe.sql import functions as SF
-from sqlglot.errors import ErrorLevel
+from hex.sqlglot import expressions as exp, parse_one
+from hex.sqlglot.dataframe.sql import functions as SF
+from hex.sqlglot.errors import ErrorLevel
 
 
 class TestFunctions(unittest.TestCase):

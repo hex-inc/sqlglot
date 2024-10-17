@@ -1,6 +1,6 @@
 import time
 
-from sqlglot.optimizer import optimize
+from hex.sqlglot.optimizer import optimize
 
 TPCH_SCHEMA = {
     "lineitem": {

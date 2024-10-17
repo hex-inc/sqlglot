@@ -1,6 +1,6 @@
-from sqlglot import ErrorLevel, UnsupportedError, exp, parse_one, transpile
-from sqlglot.helper import logger as helper_logger
-from sqlglot.optimizer.annotate_types import annotate_types
+from hex.sqlglot import ErrorLevel, UnsupportedError, exp, parse_one, transpile
+from hex.sqlglot.helper import logger as helper_logger
+from hex.sqlglot.optimizer.annotate_types import annotate_types
 from tests.dialects.test_dialect import Validator
 
 

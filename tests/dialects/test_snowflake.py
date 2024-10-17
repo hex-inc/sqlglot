@@ -1,7 +1,7 @@
 from unittest import mock
 
-from sqlglot import UnsupportedError, exp, parse_one
-from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
+from hex.sqlglot import UnsupportedError, exp, parse_one
+from hex.sqlglot.optimizer.normalize_identifiers import normalize_identifiers
 from tests.dialects.test_dialect import Validator
 
 
@@ -1859,7 +1859,7 @@ STORAGE_ALLOWED_LOCATIONS=('s3://mybucket1/path1/', 's3://mybucket2/path2/')""",
             },
         )
 
-        from sqlglot.optimizer.annotate_types import annotate_types
+        from hex.sqlglot.optimizer.annotate_types import annotate_types
 
         expression = parse_one("SELECT CAST(t.x AS STRING) FROM t", read="hive")
 

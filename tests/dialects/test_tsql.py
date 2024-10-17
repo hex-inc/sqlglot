@@ -1,6 +1,6 @@
-from sqlglot import exp, parse, parse_one
+from hex.sqlglot import exp, parse, parse_one
 from tests.dialects.test_dialect import Validator
-from sqlglot.errors import ParseError
+from hex.sqlglot.errors import ParseError
 
 
 class TestTSQL(Validator):

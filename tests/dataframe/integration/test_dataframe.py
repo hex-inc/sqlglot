@@ -1,6 +1,6 @@
 from pyspark.sql import functions as F
 
-from sqlglot.dataframe.sql import functions as SF
+from hex.sqlglot.dataframe.sql import functions as SF
 from tests.dataframe.integration.dataframe_validator import DataFrameValidator
 
 

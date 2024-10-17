@@ -1,6 +1,6 @@
 import unittest
 
-from sqlglot.dataframe.sql import types
+from hex.sqlglot.dataframe.sql import types
 
 
 class TestDataframeTypes(unittest.TestCase):

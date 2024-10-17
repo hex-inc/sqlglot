@@ -1,11 +1,11 @@
 import typing as t
 import unittest
 
-import sqlglot
-from sqlglot import MappingSchema
-from sqlglot.dataframe.sql import SparkSession
-from sqlglot.dataframe.sql.dataframe import DataFrame
-from sqlglot.helper import ensure_list
+import hex.sqlglot as sqlglot
+from hex.sqlglot import MappingSchema
+from hex.sqlglot.dataframe.sql import SparkSession
+from hex.sqlglot.dataframe.sql.dataframe import DataFrame
+from hex.sqlglot.helper import ensure_list
 
 
 class DataFrameTestBase(unittest.TestCase):

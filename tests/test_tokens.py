@@ -1,8 +1,8 @@
 import unittest
 
-from sqlglot.dialects import BigQuery
-from sqlglot.errors import TokenError
-from sqlglot.tokens import Tokenizer, TokenType
+from hex.sqlglot.dialects import BigQuery
+from hex.sqlglot.errors import TokenError
+from hex.sqlglot.tokens import Tokenizer, TokenType
 
 
 class TestTokens(unittest.TestCase):

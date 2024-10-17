@@ -1,7 +1,7 @@
 import unittest
 
-from sqlglot import parse_one
-from sqlglot.transforms import (
+from hex.sqlglot import parse_one
+from hex.sqlglot.transforms import (
     eliminate_distinct_on,
     eliminate_qualify,
     remove_precision_parameterized_types,
