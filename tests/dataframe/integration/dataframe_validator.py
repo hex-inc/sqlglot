@@ -2,7 +2,7 @@ import typing as t
 import unittest
 import warnings
 
-import sqlglot
+import hex.sqlglot as sqlglot
 from tests.helpers import SKIP_INTEGRATION
 
 if t.TYPE_CHECKING:
@@ -28,8 +28,8 @@ class DataFrameValidator(unittest.TestCase):
         from pyspark import SparkConf
         from pyspark.sql import SparkSession, types
 
-        from sqlglot.dataframe.sql import types as sqlglotSparkTypes
-        from sqlglot.dataframe.sql.session import SparkSession as SqlglotSparkSession
+        from hex.sqlglot.dataframe.sql import types as sqlglotSparkTypes
+        from hex.sqlglot.dataframe.sql.session import SparkSession as SqlglotSparkSession
 
         # This is for test `test_branching_root_dataframes`
         config = SparkConf().setAll([("spark.sql.analyzer.failAmbiguousSelfJoin", "false")])

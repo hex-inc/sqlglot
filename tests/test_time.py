@@ -1,6 +1,6 @@
 import unittest
 
-from sqlglot.time import format_time
+from hex.sqlglot.time import format_time
 
 
 class TestTime(unittest.TestCase):

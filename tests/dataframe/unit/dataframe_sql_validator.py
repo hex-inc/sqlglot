@@ -1,5 +1,5 @@
-from sqlglot.dataframe.sql import types
-from sqlglot.dataframe.sql.session import SparkSession
+from hex.sqlglot.dataframe.sql import types
+from hex.sqlglot.dataframe.sql.session import SparkSession
 from tests.dataframe.unit.dataframe_test_base import DataFrameTestBase
 
 

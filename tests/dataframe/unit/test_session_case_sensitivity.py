@@ -1,7 +1,7 @@
-import sqlglot
-from sqlglot.dataframe.sql import functions as F
-from sqlglot.dataframe.sql.session import SparkSession
-from sqlglot.errors import OptimizeError
+import hex.sqlglot as sqlglot
+from hex.sqlglot.dataframe.sql import functions as F
+from hex.sqlglot.dataframe.sql.session import SparkSession
+from hex.sqlglot.errors import OptimizeError
 from tests.dataframe.unit.dataframe_test_base import DataFrameTestBase
 
 

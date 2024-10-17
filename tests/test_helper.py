@@ -1,6 +1,6 @@
 import unittest
 
-from sqlglot.helper import merge_ranges, name_sequence, tsort
+from hex.sqlglot.helper import merge_ranges, name_sequence, tsort
 
 
 class TestHelper(unittest.TestCase):

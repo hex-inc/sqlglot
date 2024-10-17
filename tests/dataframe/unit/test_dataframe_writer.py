@@ -1,7 +1,7 @@
 from unittest import mock
 
-import sqlglot
-from sqlglot.schema import MappingSchema
+import hex.sqlglot as sqlglot
+from hex.sqlglot.schema import MappingSchema
 from tests.dataframe.unit.dataframe_sql_validator import DataFrameSQLValidator
 
 

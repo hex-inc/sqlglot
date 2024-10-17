@@ -1,5 +1,5 @@
-from sqlglot import expressions as exp
-from sqlglot.dataframe.sql.dataframe import DataFrame
+from hex.sqlglot import expressions as exp
+from hex.sqlglot.dataframe.sql.dataframe import DataFrame
 from tests.dataframe.unit.dataframe_sql_validator import DataFrameSQLValidator
 
 

@@ -1,4 +1,4 @@
-from setuptools import find_packages, setup
+from setuptools import find_namespace_packages, setup
 
 
 def sqlglotrs_version():
@@ -10,7 +10,7 @@ def sqlglotrs_version():
 
 
 setup(
-    name="sqlglot",
+    name="hex-sqlglot",
     description="An easily customizable SQL parser and transpiler",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
@@ -18,10 +18,11 @@ setup(
     author="Toby Mao",
     author_email="toby.mao@gmail.com",
     license="MIT",
-    packages=find_packages(include=["sqlglot", "sqlglot.*"]),
-    package_data={"sqlglot": ["py.typed"]},
+    packages=find_namespace_packages(where="src"),
+    package_data={"hex.sqlglot": ["py.typed"]},
+    package_dir={"": "src"},
     use_scm_version={
-        "write_to": "sqlglot/_version.py",
+        "write_to": "src/hex/sqlglot/_version.py",
         "fallback_version": "0.0.0",
         "local_scheme": "no-local-version",
     },

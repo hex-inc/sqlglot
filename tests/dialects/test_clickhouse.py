@@ -1,6 +1,6 @@
-from sqlglot import exp, parse_one
+from hex.sqlglot import exp, parse_one
 from tests.dialects.test_dialect import Validator
-from sqlglot.errors import ErrorLevel
+from hex.sqlglot.errors import ErrorLevel
 
 
 class TestClickhouse(Validator):

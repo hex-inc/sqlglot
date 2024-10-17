@@ -1,8 +1,8 @@
 from unittest import mock
 
-from sqlglot import exp, parse_one
-from sqlglot.dialects.dialect import Dialects
-from sqlglot.helper import logger as helper_logger
+from hex.sqlglot import exp, parse_one
+from hex.sqlglot.dialects.dialect import Dialects
+from hex.sqlglot.helper import logger as helper_logger
 from tests.dialects.test_dialect import Validator
 
 

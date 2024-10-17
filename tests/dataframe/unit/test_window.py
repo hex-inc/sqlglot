@@ -1,5 +1,5 @@
-from sqlglot.dataframe.sql import functions as F
-from sqlglot.dataframe.sql.window import Window, WindowSpec
+from hex.sqlglot.dataframe.sql import functions as F
+from hex.sqlglot.dataframe.sql.window import Window, WindowSpec
 from tests.dataframe.unit.dataframe_test_base import DataFrameTestBase
 
 

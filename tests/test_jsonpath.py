@@ -2,8 +2,8 @@ import json
 import os
 import unittest
 
-from sqlglot import exp, jsonpath
-from sqlglot.errors import ParseError, TokenError
+from hex.sqlglot import exp, jsonpath
+from hex.sqlglot.errors import ParseError, TokenError
 from tests.helpers import FIXTURES_DIR
 
 

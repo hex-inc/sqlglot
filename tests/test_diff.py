@@ -1,8 +1,8 @@
 import unittest
 
-from sqlglot import exp, parse_one
-from sqlglot.diff import Insert, Keep, Move, Remove, Update, diff
-from sqlglot.expressions import Join, to_table
+from hex.sqlglot import exp, parse_one
+from hex.sqlglot.diff import Insert, Keep, Move, Remove, Update, diff
+from hex.sqlglot.expressions import Join, to_table
 
 
 class TestDiff(unittest.TestCase):

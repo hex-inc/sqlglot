@@ -1,6 +1,6 @@
-import sqlglot
-from sqlglot.dataframe.sql import functions as F, types
-from sqlglot.dataframe.sql.session import SparkSession
+import hex.sqlglot as sqlglot
+from hex.sqlglot.dataframe.sql import functions as F, types
+from hex.sqlglot.dataframe.sql.session import SparkSession
 from tests.dataframe.unit.dataframe_sql_validator import DataFrameSQLValidator
 
 

@@ -1,6 +1,6 @@
 import unittest
 
-from sqlglot import (
+from hex.sqlglot import (
     Dialect,
     Dialects,
     ErrorLevel,
@@ -10,8 +10,8 @@ from sqlglot import (
     exp,
     parse_one,
 )
-from sqlglot.dialects import BigQuery, Hive, Snowflake
-from sqlglot.parser import logger as parser_logger
+from hex.sqlglot.dialects import BigQuery, Hive, Snowflake
+from hex.sqlglot.parser import logger as parser_logger
 
 
 class Validator(unittest.TestCase):
