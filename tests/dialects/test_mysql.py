@@ -1,5 +1,5 @@
-from sqlglot import expressions as exp
-from sqlglot.dialects.mysql import MySQL
+from hex.sqlglot import expressions as exp
+from hex.sqlglot.dialects.mysql import MySQL
 from tests.dialects.test_dialect import Validator
 
 

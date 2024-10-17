@@ -1,4 +1,4 @@
-from sqlglot import exp, UnsupportedError
+from hex.sqlglot import exp, UnsupportedError
 from tests.dialects.test_dialect import Validator
 
 
