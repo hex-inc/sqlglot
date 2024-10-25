@@ -1,8 +1,8 @@
 import unittest
 
-from sqlglot import exp, parse_one
-from sqlglot.diff import Insert, Move, Remove, Update, diff
-from sqlglot.expressions import Join, to_table
+from hex.sqlglot import exp, parse_one
+from hex.sqlglot.diff import Insert, Move, Remove, Update, diff
+from hex.sqlglot.expressions import Join, to_table
 
 
 def diff_delta_only(source, target, matchings=None, **kwargs):
@@ -245,7 +245,7 @@ class TestDiff(unittest.TestCase):
         )
 
     def test_dialect_aware_diff(self):
-        from sqlglot.generator import logger
+        from hex.sqlglot.generator import logger
 
         with self.assertLogs(logger) as cm:
             # We want to assert there are no warnings, but the 'assertLogs' method does not support that.

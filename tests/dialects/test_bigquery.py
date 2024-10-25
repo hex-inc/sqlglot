@@ -2,7 +2,7 @@ from unittest import mock
 import datetime
 import pytz
 
-from sqlglot import (
+from hex.sqlglot import (
     ErrorLevel,
     ParseError,
     TokenError,
@@ -12,8 +12,8 @@ from sqlglot import (
     parse_one,
     transpile,
 )
-from sqlglot.helper import logger as helper_logger
-from sqlglot.parser import logger as parser_logger
+from hex.sqlglot.helper import logger as helper_logger
+from hex.sqlglot.parser import logger as parser_logger
 from tests.dialects.test_dialect import Validator
 
 

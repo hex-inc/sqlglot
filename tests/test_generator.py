@@ -1,9 +1,9 @@
 import unittest
 
-from sqlglot import exp, parse_one
-from sqlglot.expressions import Func
-from sqlglot.parser import Parser
-from sqlglot.tokens import Tokenizer
+from hex.sqlglot import exp, parse_one
+from hex.sqlglot.expressions import Func
+from hex.sqlglot.parser import Parser
+from hex.sqlglot.tokens import Tokenizer
 
 
 class TestGenerator(unittest.TestCase):

@@ -1,6 +1,6 @@
-from sqlglot import ErrorLevel, ParseError, UnsupportedError, exp, parse_one, transpile
-from sqlglot.helper import logger as helper_logger
-from sqlglot.optimizer.annotate_types import annotate_types
+from hex.sqlglot import ErrorLevel, ParseError, UnsupportedError, exp, parse_one, transpile
+from hex.sqlglot.helper import logger as helper_logger
+from hex.sqlglot.optimizer.annotate_types import annotate_types
 from tests.dialects.test_dialect import Validator
 
 
@@ -1358,7 +1358,7 @@ class TestDuckDB(Validator):
 
     def test_ignore_nulls(self):
         # Note that DuckDB differentiates window functions (e.g. LEAD, LAG) from aggregate functions (e.g. SUM)
-        from sqlglot.dialects.duckdb import WINDOW_FUNCS_WITH_IGNORE_NULLS
+        from hex.sqlglot.dialects.duckdb import WINDOW_FUNCS_WITH_IGNORE_NULLS
 
         agg_funcs = (exp.Sum, exp.Max, exp.Min)
 

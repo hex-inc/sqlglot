@@ -1,8 +1,8 @@
 import unittest
 
-from sqlglot import exp, parse_one, to_table
-from sqlglot.errors import SchemaError
-from sqlglot.schema import MappingSchema, ensure_schema
+from hex.sqlglot import exp, parse_one, to_table
+from hex.sqlglot.errors import SchemaError
+from hex.sqlglot.schema import MappingSchema, ensure_schema
 
 
 class TestSchema(unittest.TestCase):
