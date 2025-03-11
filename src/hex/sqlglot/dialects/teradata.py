@@ -8,6 +8,7 @@ from hex.sqlglot.dialects.dialect import (
     max_or_greatest,
     min_or_least,
     rename_func,
+    strposition_sql,
     to_number_with_nls_param,
 )
 from hex.sqlglot.helper import seq_get
@@ -71,6 +72,9 @@ class Teradata(Dialect):
     }
 
     class Tokenizer(tokens.Tokenizer):
+        # Tested each of these and they work, although there is no
+        # Teradata documentation explicitly mentioning them.
+        HEX_STRINGS = [("X'", "'"), ("x'", "'"), ("0x", "")]
         # https://docs.teradata.com/r/Teradata-Database-SQL-Functions-Operators-Expressions-and-Predicates/March-2017/Comparison-Operators-and-Functions/Comparison-Operators/ANSI-Compliance
         # https://docs.teradata.com/r/SQL-Functions-Operators-Expressions-and-Predicates/June-2017/Arithmetic-Trigonometric-Hyperbolic-Operators/Functions
         KEYWORDS = {
@@ -163,6 +167,7 @@ class Teradata(Dialect):
 
         FUNCTIONS = {
             **parser.Parser.FUNCTIONS,
+            "CARDINALITY": exp.ArraySize.from_arg_list,
             "RANDOM": lambda args: exp.Rand(lower=seq_get(args, 0), upper=seq_get(args, 1)),
         }
 
@@ -224,6 +229,7 @@ class Teradata(Dialect):
         LAST_DAY_SUPPORTS_DATE_PART = False
         CAN_IMPLEMENT_ARRAY_ANY = True
         TZ_TO_WITH_TIME_ZONE = True
+        ARRAY_SIZE_NAME = "CARDINALITY"
 
         TYPE_MAPPING = {
             **generator.Generator.TYPE_MAPPING,
@@ -243,13 +249,17 @@ class Teradata(Dialect):
             **generator.Generator.TRANSFORMS,
             exp.ArgMax: rename_func("MAX_BY"),
             exp.ArgMin: rename_func("MIN_BY"),
-            exp.ArraySize: rename_func("CARDINALITY"),
             exp.Max: max_or_greatest,
             exp.Min: min_or_least,
             exp.Pow: lambda self, e: self.binary(e, "**"),
             exp.Rand: lambda self, e: self.func("RANDOM", e.args.get("lower"), e.args.get("upper")),
             exp.Select: transforms.preprocess(
                 [transforms.eliminate_distinct_on, transforms.eliminate_semi_and_anti_joins]
+            ),
+            exp.StrPosition: lambda self, e: (
+                strposition_sql(
+                    self, e, func_name="INSTR", supports_position=True, supports_occurrence=True
+                )
             ),
             exp.StrToDate: lambda self,
             e: f"CAST({self.sql(e, 'this')} AS DATE FORMAT {self.format_time(e)})",

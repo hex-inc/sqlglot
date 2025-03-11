@@ -802,8 +802,41 @@ class TestBuild(unittest.TestCase):
                 "MERGE INTO target_table AS target USING source_table AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET target.name = source.name RETURNING target.*",
             ),
             (
+                lambda: exp.merge(
+                    exp.When(
+                        matched=True,
+                        then=exp.Update(
+                            expressions=[
+                                exp.column("name", "target").eq(exp.column("name", "source"))
+                            ]
+                        ),
+                    ),
+                    into=exp.table_("target_table").as_("target"),
+                    using=exp.table_("source_table").as_("source"),
+                    on="target.id = source.id",
+                    returning="target.*",
+                ),
+                "MERGE INTO target_table AS target USING source_table AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET target.name = source.name RETURNING target.*",
+            ),
+            (
                 lambda: exp.union("SELECT 1", "SELECT 2", "SELECT 3", "SELECT 4"),
                 "SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4",
+            ),
+            (
+                lambda: select("x")
+                .with_("var1", as_=select("x").from_("tbl2").subquery(), scalar=True)
+                .from_("tbl")
+                .where("x > var1"),
+                "WITH (SELECT x FROM tbl2) AS var1 SELECT x FROM tbl WHERE x > var1",
+                "clickhouse",
+            ),
+            (
+                lambda: select("x")
+                .with_("var1", as_=select("x").from_("tbl2"), scalar=True)
+                .from_("tbl")
+                .where("x > var1"),
+                "WITH (SELECT x FROM tbl2) AS var1 SELECT x FROM tbl WHERE x > var1",
+                "clickhouse",
             ),
         ]:
             with self.subTest(sql):

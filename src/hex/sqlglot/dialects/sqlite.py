@@ -15,8 +15,9 @@ from hex.sqlglot.dialects.dialect import (
     no_tablesample_sql,
     no_trycast_sql,
     rename_func,
-    str_position_sql,
+    strposition_sql,
 )
+from hex.sqlglot.generator import unsupported_args
 from hex.sqlglot.tokens import TokenType
 
 
@@ -120,6 +121,14 @@ class SQLite(Dialect):
         }
         STRING_ALIASES = True
 
+        def _parse_unique(self) -> exp.UniqueColumnConstraint:
+            # Do not consume more tokens if UNIQUE is used as a standalone constraint, e.g:
+            # CREATE TABLE foo (bar TEXT UNIQUE REFERENCES baz ...)
+            if self._curr.text.upper() in self.CONSTRAINT_PARSERS:
+                return self.expression(exp.UniqueColumnConstraint)
+
+            return super()._parse_unique()
+
     class Generator(generator.Generator):
         JOIN_HINTS = False
         TABLE_HINTS = False
@@ -130,6 +139,8 @@ class SQLite(Dialect):
         SUPPORTS_TABLE_ALIAS_COLUMNS = False
         SUPPORTS_TO_NUMBER = False
         EXCEPT_INTERSECT_SUPPORT_ALL_CLAUSE = False
+        SUPPORTS_MEDIAN = False
+        JSON_KEY_VALUE_PAIR_SEP = ","
 
         SUPPORTED_JSON_PATH_PARTS = {
             exp.JSONPathKey,
@@ -154,6 +165,7 @@ class SQLite(Dialect):
             exp.DataType.Type.BINARY: "BLOB",
             exp.DataType.Type.VARBINARY: "BLOB",
         }
+        TYPE_MAPPING.pop(exp.DataType.Type.BLOB)
 
         TOKEN_MAPPING = {
             TokenType.AUTO_INCREMENT: "AUTOINCREMENT",
@@ -162,6 +174,7 @@ class SQLite(Dialect):
         TRANSFORMS = {
             **generator.Generator.TRANSFORMS,
             exp.AnyValue: any_value_to_max_sql,
+            exp.Chr: rename_func("CHAR"),
             exp.Concat: concat_to_dpipe_sql,
             exp.CountIf: count_if_to_sum,
             exp.Create: transforms.preprocess([_transform_create]),
@@ -175,7 +188,9 @@ class SQLite(Dialect):
             exp.ILike: no_ilike_sql,
             exp.JSONExtract: _json_extract_sql,
             exp.JSONExtractScalar: arrow_json_extract_sql,
-            exp.Levenshtein: rename_func("EDITDIST3"),
+            exp.Levenshtein: unsupported_args("ins_cost", "del_cost", "sub_cost", "max_dist")(
+                rename_func("EDITDIST3")
+            ),
             exp.LogicalOr: rename_func("MAX"),
             exp.LogicalAnd: rename_func("MIN"),
             exp.Pivot: no_pivot_sql,
@@ -187,9 +202,7 @@ class SQLite(Dialect):
                     transforms.eliminate_semi_and_anti_joins,
                 ]
             ),
-            exp.StrPosition: lambda self, e: str_position_sql(
-                self, e, str_position_func_name="INSTR"
-            ),
+            exp.StrPosition: lambda self, e: strposition_sql(self, e, func_name="INSTR"),
             exp.TableSample: no_tablesample_sql,
             exp.TimeStrToTime: lambda self, e: self.sql(e, "this"),
             exp.TimeToStr: lambda self, e: self.func("STRFTIME", e.args.get("format"), e.this),
@@ -288,3 +301,10 @@ class SQLite(Dialect):
             this = expression.this
             this = f" {this}" if this else ""
             return f"BEGIN{this} TRANSACTION"
+
+        def isascii_sql(self, expression: exp.IsAscii) -> str:
+            return f"(NOT {self.sql(expression.this)} GLOB CAST(x'2a5b5e012d7f5d2a' AS TEXT))"
+
+        @unsupported_args("this")
+        def currentschema_sql(self, expression: exp.CurrentSchema) -> str:
+            return "'main'"

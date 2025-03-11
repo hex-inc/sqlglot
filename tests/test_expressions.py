@@ -55,7 +55,6 @@ class TestExpressions(unittest.TestCase):
             parse_one("ROW() OVER(Partition by y)"),
             parse_one("ROW() OVER (partition BY y)"),
         )
-        self.assertEqual(parse_one("TO_DATE(x)", read="hive"), parse_one("ts_or_ds_to_date(x)"))
         self.assertEqual(exp.Table(pivots=[]), exp.Table())
         self.assertNotEqual(exp.Table(pivots=[None]), exp.Table())
         self.assertEqual(
@@ -216,12 +215,14 @@ class TestExpressions(unittest.TestCase):
         self.assertEqual(exp.table_name(exp.to_table("a.b.c.d.e", dialect="bigquery")), "a.b.c.d.e")
         self.assertEqual(exp.table_name(exp.to_table("'@foo'", dialect="snowflake")), "'@foo'")
         self.assertEqual(exp.table_name(exp.to_table("@foo", dialect="snowflake")), "@foo")
+        self.assertEqual(exp.table_name(bq_dashed_table, identify=True), '"a-1"."b"."c"')
         self.assertEqual(
             exp.table_name(parse_one("foo.`{bar,er}`", read="databricks"), dialect="databricks"),
             "foo.`{bar,er}`",
         )
-
-        self.assertEqual(exp.table_name(bq_dashed_table, identify=True), '"a-1"."b"."c"')
+        self.assertEqual(
+            exp.table_name(parse_one("/*c*/foo.bar", into=exp.Table), identify=True), '"foo"."bar"'
+        )
 
     def test_table(self):
         self.assertEqual(exp.table_("a", alias="b"), parse_one("select * from a b").find(exp.Table))
@@ -254,6 +255,14 @@ class TestExpressions(unittest.TestCase):
                 dialect="bigquery",
             ).sql(),
             'SELECT * FROM "my-project"."example"."table" /* example.table */',
+        )
+
+        self.assertEqual(
+            exp.replace_tables(
+                parse_one("select * from example.table /* sqlglot.meta replace=false */"),
+                {"example.table": "a.b"},
+            ).sql(),
+            "SELECT * FROM example.table /* sqlglot.meta replace=false */",
         )
 
     def test_expand(self):
@@ -621,6 +630,12 @@ class TestExpressions(unittest.TestCase):
         self.assertEqual(len(list(expression.walk(bfs=False))), 9)
         self.assertTrue(all(isinstance(e, exp.Expression) for e in expression.walk()))
         self.assertTrue(all(isinstance(e, exp.Expression) for e in expression.walk(bfs=False)))
+
+    def test_str_position_order(self):
+        str_position_exp = parse_one("STR_POSITION('mytest', 'test')")
+        self.assertIsInstance(str_position_exp, exp.StrPosition)
+        self.assertEqual(str_position_exp.args.get("this").this, "mytest")
+        self.assertEqual(str_position_exp.args.get("substr").this, "test")
 
     def test_functions(self):
         self.assertIsInstance(parse_one("x LIKE ANY (y)"), exp.Like)
@@ -1166,7 +1181,7 @@ FROM foo""",
 
     def test_set_meta(self):
         query = parse_one("SELECT * FROM foo /* sqlglot.meta x = 1, y = a, z */")
-        self.assertEqual(query.find(exp.Table).meta, {"x": "1", "y": "a", "z": True})
+        self.assertEqual(query.find(exp.Table).meta, {"x": True, "y": "a", "z": True})
         self.assertEqual(query.sql(), "SELECT * FROM foo /* sqlglot.meta x = 1, y = a, z */")
 
     def test_assert_is(self):

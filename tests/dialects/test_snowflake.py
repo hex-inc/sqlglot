@@ -21,27 +21,7 @@ class TestSnowflake(Validator):
         expr.selects[0].assert_is(exp.AggFunc)
         self.assertEqual(expr.sql(dialect="snowflake"), "SELECT APPROX_TOP_K(C4, 3, 5) FROM t")
 
-        self.assertEqual(
-            exp.select(exp.Explode(this=exp.column("x")).as_("y", quoted=True)).sql(
-                "snowflake", pretty=True
-            ),
-            """SELECT
-  IFF(_u.pos = _u_2.pos_2, _u_2."y", NULL) AS "y"
-FROM TABLE(FLATTEN(INPUT => ARRAY_GENERATE_RANGE(0, (
-  GREATEST(ARRAY_SIZE(x)) - 1
-) + 1))) AS _u(seq, key, path, index, pos, this)
-CROSS JOIN TABLE(FLATTEN(INPUT => x)) AS _u_2(seq, key, path, pos_2, "y", this)
-WHERE
-  _u.pos = _u_2.pos_2
-  OR (
-    _u.pos > (
-      ARRAY_SIZE(x) - 1
-    ) AND _u_2.pos_2 = (
-      ARRAY_SIZE(x) - 1
-    )
-  )""",
-        )
-
+        self.validate_identity("INSERT INTO test VALUES (x'48FAF43B0AFCEF9B63EE3A93EE2AC2')")
         self.validate_identity("exclude := [foo]")
         self.validate_identity("SELECT CAST([1, 2, 3] AS VECTOR(FLOAT, 3))")
         self.validate_identity("SELECT CONNECT_BY_ROOT test AS test_column_alias")
@@ -56,7 +36,6 @@ WHERE
         self.validate_identity("SELECT CAST(obj AS OBJECT(x CHAR) RENAME FIELDS)")
         self.validate_identity("SELECT CAST(obj AS OBJECT(x CHAR, y VARCHAR) ADD FIELDS)")
         self.validate_identity("SELECT TO_TIMESTAMP(123.4)").selects[0].assert_is(exp.Anonymous)
-        self.validate_identity("SELECT TO_TIME(x) FROM t")
         self.validate_identity("SELECT TO_TIMESTAMP(x) FROM t")
         self.validate_identity("SELECT TO_TIMESTAMP_NTZ(x) FROM t")
         self.validate_identity("SELECT TO_TIMESTAMP_LTZ(x) FROM t")
@@ -73,7 +52,6 @@ WHERE
         self.validate_identity("SELECT OBJECT_CONSTRUCT()")
         self.validate_identity("SELECT DAYOFMONTH(CURRENT_TIMESTAMP())")
         self.validate_identity("SELECT DAYOFYEAR(CURRENT_TIMESTAMP())")
-        self.validate_identity("LISTAGG(data['some_field'], ',')")
         self.validate_identity("WEEKOFYEAR(tstamp)")
         self.validate_identity("SELECT QUARTER(CURRENT_TIMESTAMP())")
         self.validate_identity("SELECT SUM(amount) FROM mytable GROUP BY ALL")
@@ -97,6 +75,7 @@ WHERE
         self.validate_identity("SELECT MATCH_CONDITION")
         self.validate_identity("SELECT * REPLACE (CAST(col AS TEXT) AS scol) FROM t")
         self.validate_identity("1 /* /* */")
+        self.validate_identity("TO_TIMESTAMP(col, fmt)")
         self.validate_identity(
             "SELECT * FROM table AT (TIMESTAMP => '2024-07-24') UNPIVOT(a FOR b IN (c)) AS pivot_table"
         )
@@ -123,6 +102,21 @@ WHERE
         )
         self.validate_identity(
             "SELECT * FROM DATA AS DATA_L ASOF JOIN DATA AS DATA_R MATCH_CONDITION (DATA_L.VAL > DATA_R.VAL) ON DATA_L.ID = DATA_R.ID"
+        )
+        self.validate_identity(
+            """SELECT TO_TIMESTAMP('2025-01-16T14:45:30.123+0500', 'yyyy-mm-DD"T"hh24:mi:ss.ff3TZHTZM')"""
+        )
+        self.validate_identity(
+            "SELECT 1 put",
+            "SELECT 1 AS put",
+        )
+        self.validate_identity(
+            "WITH t (SELECT 1 AS c) SELECT c FROM t",
+            "WITH t AS (SELECT 1 AS c) SELECT c FROM t",
+        )
+        self.validate_identity(
+            "GET_PATH(json_data, '$id')",
+            """GET_PATH(json_data, '["$id"]')""",
         )
         self.validate_identity(
             "CAST(x AS GEOGRAPHY)",
@@ -305,6 +299,34 @@ WHERE
             "SELECT * RENAME (a AS b), c AS d FROM xxx",
         )
 
+        # Support for optional trailing commas after tables in from clause
+        self.validate_identity(
+            "SELECT * FROM xxx, yyy, zzz,",
+            "SELECT * FROM xxx, yyy, zzz",
+        )
+        self.validate_identity(
+            "SELECT * FROM xxx, yyy, zzz, WHERE foo = bar",
+            "SELECT * FROM xxx, yyy, zzz WHERE foo = bar",
+        )
+        self.validate_identity(
+            "SELECT * FROM xxx, yyy, zzz",
+            "SELECT * FROM xxx, yyy, zzz",
+        )
+
+        self.validate_all(
+            "CREATE TABLE test_table (id NUMERIC NOT NULL AUTOINCREMENT)",
+            write={
+                "duckdb": "CREATE TABLE test_table (id DECIMAL(38, 0) NOT NULL)",
+                "snowflake": "CREATE TABLE test_table (id DECIMAL(38, 0) NOT NULL AUTOINCREMENT)",
+            },
+        )
+        self.validate_all(
+            "SELECT TO_TIMESTAMP('2025-01-16 14:45:30.123', 'yyyy-mm-DD hh24:mi:ss.ff6')",
+            write={
+                "": "SELECT STR_TO_TIME('2025-01-16 14:45:30.123', '%Y-%m-%d %H:%M:%S.%f')",
+                "snowflake": "SELECT TO_TIMESTAMP('2025-01-16 14:45:30.123', 'yyyy-mm-DD hh24:mi:ss.ff6')",
+            },
+        )
         self.validate_all(
             "ARRAY_CONSTRUCT_COMPACT(1, null, 2)",
             write={
@@ -500,6 +522,7 @@ WHERE
             write={
                 "": "SELECT LOGICAL_OR(c1), LOGICAL_OR(c2) FROM test",
                 "duckdb": "SELECT BOOL_OR(c1), BOOL_OR(c2) FROM test",
+                "oracle": "SELECT MAX(c1), MAX(c2) FROM test",
                 "postgres": "SELECT BOOL_OR(c1), BOOL_OR(c2) FROM test",
                 "snowflake": "SELECT BOOLOR_AGG(c1), BOOLOR_AGG(c2) FROM test",
                 "spark": "SELECT BOOL_OR(c1), BOOL_OR(c2) FROM test",
@@ -511,10 +534,12 @@ WHERE
             write={
                 "": "SELECT LOGICAL_AND(c1), LOGICAL_AND(c2) FROM test",
                 "duckdb": "SELECT BOOL_AND(c1), BOOL_AND(c2) FROM test",
+                "oracle": "SELECT MIN(c1), MIN(c2) FROM test",
                 "postgres": "SELECT BOOL_AND(c1), BOOL_AND(c2) FROM test",
                 "snowflake": "SELECT BOOLAND_AGG(c1), BOOLAND_AGG(c2) FROM test",
                 "spark": "SELECT BOOL_AND(c1), BOOL_AND(c2) FROM test",
                 "sqlite": "SELECT MIN(c1), MIN(c2) FROM test",
+                "mysql": "SELECT MIN(c1), MIN(c2) FROM test",
             },
         )
         for suffix in (
@@ -524,21 +549,11 @@ WHERE
             self.validate_all(
                 f"SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x){suffix}",
                 read={
-                    "snowflake": f"SELECT MEDIAN(x){suffix}",
                     "postgres": f"SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x){suffix}",
                 },
                 write={
                     "": f"SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x NULLS LAST){suffix}",
                     "duckdb": f"SELECT QUANTILE_CONT(x, 0.5 ORDER BY x){suffix}",
-                    "postgres": f"SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x){suffix}",
-                    "snowflake": f"SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x){suffix}",
-                },
-            )
-            self.validate_all(
-                f"SELECT MEDIAN(x){suffix}",
-                write={
-                    "": f"SELECT PERCENTILE_CONT(x, 0.5){suffix}",
-                    "duckdb": f"SELECT QUANTILE_CONT(x, 0.5){suffix}",
                     "postgres": f"SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x){suffix}",
                     "snowflake": f"SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x){suffix}",
                 },
@@ -616,6 +631,17 @@ WHERE
             },
         )
         self.validate_all(
+            "DIV0(a - b, c - d)",
+            write={
+                "snowflake": "IFF((c - d) = 0 AND NOT (a - b) IS NULL, 0, (a - b) / (c - d))",
+                "sqlite": "IIF((c - d) = 0 AND NOT (a - b) IS NULL, 0, CAST((a - b) AS REAL) / (c - d))",
+                "presto": "IF((c - d) = 0 AND NOT (a - b) IS NULL, 0, CAST((a - b) AS DOUBLE) / (c - d))",
+                "spark": "IF((c - d) = 0 AND NOT (a - b) IS NULL, 0, (a - b) / (c - d))",
+                "hive": "IF((c - d) = 0 AND NOT (a - b) IS NULL, 0, (a - b) / (c - d))",
+                "duckdb": "CASE WHEN (c - d) = 0 AND NOT (a - b) IS NULL THEN 0 ELSE (a - b) / (c - d) END",
+            },
+        )
+        self.validate_all(
             "ZEROIFNULL(foo)",
             write={
                 "snowflake": "IFF(foo IS NULL, 0, foo)",
@@ -670,6 +696,15 @@ WHERE
             },
         )
         self.validate_all(
+            "SELECT TO_TIMESTAMP(col, 'DD-MM-YYYY HH12:MI:SS') FROM t",
+            write={
+                "bigquery": "SELECT PARSE_TIMESTAMP('%d-%m-%Y %I:%M:%S', col) FROM t",
+                "duckdb": "SELECT STRPTIME(col, '%d-%m-%Y %I:%M:%S') FROM t",
+                "snowflake": "SELECT TO_TIMESTAMP(col, 'DD-mm-yyyy hh12:mi:ss') FROM t",
+                "spark": "SELECT TO_TIMESTAMP(col, 'dd-MM-yyyy hh:mm:ss') FROM t",
+            },
+        )
+        self.validate_all(
             "SELECT TO_TIMESTAMP(1659981729)",
             write={
                 "bigquery": "SELECT TIMESTAMP_SECONDS(1659981729)",
@@ -716,13 +751,6 @@ WHERE
                 "bigquery": "SELECT CAST('2013-04-05 01:02:03' AS DATETIME)",
                 "snowflake": "SELECT CAST('2013-04-05 01:02:03' AS TIMESTAMP)",
                 "spark": "SELECT CAST('2013-04-05 01:02:03' AS TIMESTAMP)",
-            },
-        )
-        self.validate_all(
-            "SELECT TO_TIME('12:05:00')",
-            write={
-                "bigquery": "SELECT CAST('12:05:00' AS TIME)",
-                "snowflake": "SELECT CAST('12:05:00' AS TIME)",
             },
         )
         self.validate_all(
@@ -849,13 +877,6 @@ WHERE
             },
         )
         self.validate_all(
-            "SELECT LISTAGG(col1, ', ') WITHIN GROUP (ORDER BY col2) FROM t",
-            write={
-                "duckdb": "SELECT GROUP_CONCAT(col1, ', ' ORDER BY col2) FROM t",
-                "snowflake": "SELECT LISTAGG(col1, ', ') WITHIN GROUP (ORDER BY col2) FROM t",
-            },
-        )
-        self.validate_all(
             "SELECT APPROX_PERCENTILE(a, 0.5) FROM t",
             read={
                 "trino": "SELECT APPROX_PERCENTILE(a, 1, 0.5, 0.001) FROM t",
@@ -955,6 +976,27 @@ WHERE
                 "duckdb": "SELECT CAST(TRY_STRPTIME('04/05/2013 01:02:03', '%m/%d/%Y %H:%M:%S') AS TIMESTAMP)",
             },
         )
+
+        self.validate_identity("EDITDISTANCE(col1, col2)")
+        self.validate_all(
+            "EDITDISTANCE(col1, col2, 3)",
+            write={
+                "bigquery": "EDIT_DISTANCE(col1, col2, max_distance => 3)",
+                "postgres": "LEVENSHTEIN_LESS_EQUAL(col1, col2, 3)",
+                "snowflake": "EDITDISTANCE(col1, col2, 3)",
+            },
+        )
+        self.validate_identity("SELECT BITOR(a, b)")
+        self.validate_identity("SELECT BIT_OR(a, b)", "SELECT BITOR(a, b)")
+        self.validate_identity("SELECT BITOR(a, b, 'LEFT')")
+        self.validate_identity("SELECT BITXOR(a, b, 'LEFT')")
+        self.validate_identity("SELECT BIT_XOR(a, b)", "SELECT BITXOR(a, b)")
+        self.validate_identity("SELECT BIT_XOR(a, b, 'LEFT')", "SELECT BITXOR(a, b, 'LEFT')")
+        self.validate_identity("SELECT BITSHIFTLEFT(a, 1)")
+        self.validate_identity("SELECT BIT_SHIFTLEFT(a, 1)", "SELECT BITSHIFTLEFT(a, 1)")
+        self.validate_identity("SELECT BIT_SHIFTRIGHT(a, 1)", "SELECT BITSHIFTRIGHT(a, 1)")
+
+        self.validate_identity("CREATE TABLE t (id INT PRIMARY KEY AUTOINCREMENT)")
 
     def test_null_treatment(self):
         self.validate_all(
@@ -1265,6 +1307,37 @@ WHERE
             },
         )
 
+        self.validate_identity("SELECT TO_TIME(x) FROM t")
+        self.validate_all(
+            "SELECT TO_TIME('12:05:00')",
+            write={
+                "bigquery": "SELECT CAST('12:05:00' AS TIME)",
+                "snowflake": "SELECT CAST('12:05:00' AS TIME)",
+                "duckdb": "SELECT CAST('12:05:00' AS TIME)",
+            },
+        )
+        self.validate_all(
+            "SELECT TO_TIME(CONVERT_TIMEZONE('UTC', 'US/Pacific', '2024-08-06 09:10:00.000')) AS pst_time",
+            write={
+                "snowflake": "SELECT TO_TIME(CONVERT_TIMEZONE('UTC', 'US/Pacific', '2024-08-06 09:10:00.000')) AS pst_time",
+                "duckdb": "SELECT CAST(CAST('2024-08-06 09:10:00.000' AS TIMESTAMP) AT TIME ZONE 'UTC' AT TIME ZONE 'US/Pacific' AS TIME) AS pst_time",
+            },
+        )
+        self.validate_all(
+            "SELECT TO_TIME('11.15.00', 'hh24.mi.ss')",
+            write={
+                "snowflake": "SELECT TO_TIME('11.15.00', 'hh24.mi.ss')",
+                "duckdb": "SELECT CAST(STRPTIME('11.15.00', '%H.%M.%S') AS TIME)",
+            },
+        )
+        self.validate_all(
+            "SELECT TRY_TO_TIME('11.15.00', 'hh24.mi.ss')",
+            write={
+                "snowflake": "SELECT TRY_TO_TIME('11.15.00', 'hh24.mi.ss')",
+                "duckdb": "SELECT CAST(STRPTIME('11.15.00', '%H.%M.%S') AS TIME)",
+            },
+        )
+
     def test_semi_structured_types(self):
         self.validate_identity("SELECT CAST(a AS VARIANT)")
         self.validate_identity("SELECT CAST(a AS ARRAY)")
@@ -1371,18 +1444,10 @@ WHERE
                     "CREATE TABLE t (id INT TAG (key1='value_1', key2='value_2'))",
                 )
 
+        self.validate_identity("USE SECONDARY ROLES ALL")
+        self.validate_identity("USE SECONDARY ROLES NONE")
+        self.validate_identity("USE SECONDARY ROLES a, b, c")
         self.validate_identity("CREATE SECURE VIEW table1 AS (SELECT a FROM table2)")
-        self.validate_identity(
-            """create external table et2(
-  col1 date as (parse_json(metadata$external_table_partition):COL1::date),
-  col2 varchar as (parse_json(metadata$external_table_partition):COL2::varchar),
-  col3 number as (parse_json(metadata$external_table_partition):COL3::number))
-  partition by (col1,col2,col3)
-  location=@s2/logs/
-  partition_type = user_specified
-  file_format = (type = parquet)""",
-            "CREATE EXTERNAL TABLE et2 (col1 DATE AS (CAST(GET_PATH(PARSE_JSON(metadata$external_table_partition), 'COL1') AS DATE)), col2 VARCHAR AS (CAST(GET_PATH(PARSE_JSON(metadata$external_table_partition), 'COL2') AS VARCHAR)), col3 DECIMAL(38, 0) AS (CAST(GET_PATH(PARSE_JSON(metadata$external_table_partition), 'COL3') AS DECIMAL(38, 0)))) LOCATION @s2/logs/ PARTITION BY (col1, col2, col3) partition_type=user_specified file_format=(type = parquet)",
-        )
         self.validate_identity("CREATE OR REPLACE VIEW foo (uid) COPY GRANTS AS (SELECT 1)")
         self.validate_identity("CREATE TABLE geospatial_table (id INT, g GEOGRAPHY)")
         self.validate_identity("CREATE MATERIALIZED VIEW a COMMENT='...' AS SELECT 1 FROM x")
@@ -1430,6 +1495,9 @@ WHERE
             """CREATE OR REPLACE FUNCTION ibis_udfs.public.object_values("obj" OBJECT) RETURNS ARRAY LANGUAGE JAVASCRIPT STRICT AS ' return Object.values(obj) '"""
         )
         self.validate_identity(
+            "CREATE OR REPLACE TABLE TEST (SOME_REF DECIMAL(38, 0) NOT NULL FOREIGN KEY REFERENCES SOME_OTHER_TABLE (ID))"
+        )
+        self.validate_identity(
             "CREATE OR REPLACE FUNCTION my_udf(location OBJECT(city VARCHAR, zipcode DECIMAL(38, 0), val ARRAY(BOOLEAN))) RETURNS VARCHAR AS $$ SELECT 'foo' $$",
             "CREATE OR REPLACE FUNCTION my_udf(location OBJECT(city VARCHAR, zipcode DECIMAL(38, 0), val ARRAY(BOOLEAN))) RETURNS VARCHAR AS ' SELECT \\'foo\\' '",
         )
@@ -1444,6 +1512,17 @@ WHERE
         self.validate_identity(
             "CREATE SEQUENCE seq1 WITH START=1 INCREMENT=1 ORDER",
             "CREATE SEQUENCE seq1 START=1 INCREMENT=1 ORDER",
+        )
+        self.validate_identity(
+            """create external table et2(
+  col1 date as (parse_json(metadata$external_table_partition):COL1::date),
+  col2 varchar as (parse_json(metadata$external_table_partition):COL2::varchar),
+  col3 number as (parse_json(metadata$external_table_partition):COL3::number))
+  partition by (col1,col2,col3)
+  location=@s2/logs/
+  partition_type = user_specified
+  file_format = (type = parquet)""",
+            "CREATE EXTERNAL TABLE et2 (col1 DATE AS (CAST(GET_PATH(PARSE_JSON(metadata$external_table_partition), 'COL1') AS DATE)), col2 VARCHAR AS (CAST(GET_PATH(PARSE_JSON(metadata$external_table_partition), 'COL2') AS VARCHAR)), col3 DECIMAL(38, 0) AS (CAST(GET_PATH(PARSE_JSON(metadata$external_table_partition), 'COL3') AS DECIMAL(38, 0)))) LOCATION @s2/logs/ PARTITION BY (col1, col2, col3) partition_type=user_specified file_format=(type = parquet)",
         )
 
         self.validate_all(
@@ -1468,11 +1547,18 @@ WHERE
                 "snowflake": "CREATE OR REPLACE TRANSIENT TABLE a (id INT)",
             },
         )
-
         self.validate_all(
             "CREATE TABLE a (b INT)",
             read={"teradata": "CREATE MULTISET TABLE a (b INT)"},
             write={"snowflake": "CREATE TABLE a (b INT)"},
+        )
+
+        self.validate_identity("CREATE TABLE a TAG (key1='value_1', key2='value_2')")
+        self.validate_all(
+            "CREATE TABLE a TAG (key1='value_1')",
+            read={
+                "snowflake": "CREATE TABLE a WITH TAG (key1='value_1')",
+            },
         )
 
         for action in ("SET", "DROP"):
@@ -1563,6 +1649,27 @@ WHERE
         )
 
     def test_flatten(self):
+        self.assertEqual(
+            exp.select(exp.Explode(this=exp.column("x")).as_("y", quoted=True)).sql(
+                "snowflake", pretty=True
+            ),
+            """SELECT
+  IFF(_u.pos = _u_2.pos_2, _u_2."y", NULL) AS "y"
+FROM TABLE(FLATTEN(INPUT => ARRAY_GENERATE_RANGE(0, (
+  GREATEST(ARRAY_SIZE(x)) - 1
+) + 1))) AS _u(seq, key, path, index, pos, this)
+CROSS JOIN TABLE(FLATTEN(INPUT => x)) AS _u_2(seq, key, path, pos_2, "y", this)
+WHERE
+  _u.pos = _u_2.pos_2
+  OR (
+    _u.pos > (
+      ARRAY_SIZE(x) - 1
+    ) AND _u_2.pos_2 = (
+      ARRAY_SIZE(x) - 1
+    )
+  )""",
+        )
+
         self.validate_all(
             """
             select
@@ -1584,6 +1691,75 @@ WHERE
   dag_report.dag_id,
   CAST(f.value AS VARCHAR) AS operator
 FROM cs.telescope.dag_report, TABLE(FLATTEN(input => SPLIT(operators, ','))) AS f"""
+            },
+            pretty=True,
+        )
+        self.validate_all(
+            """
+            SELECT
+              uc.user_id,
+              uc.start_ts AS ts,
+              CASE
+                WHEN uc.start_ts::DATE >= '2023-01-01' AND uc.country_code IN ('US') AND uc.user_id NOT IN (
+                  SELECT DISTINCT
+                    _id
+                  FROM
+                    users,
+                    LATERAL FLATTEN(INPUT => PARSE_JSON(flags)) datasource
+                  WHERE datasource.value:name = 'something'
+                )
+                  THEN 'Sample1'
+                  ELSE 'Sample2'
+              END AS entity
+            FROM user_countries AS uc
+            LEFT JOIN (
+              SELECT user_id, MAX(IFF(service_entity IS NULL,1,0)) AS le_null
+              FROM accepted_user_agreements
+              GROUP BY 1
+            ) AS aua
+              ON uc.user_id = aua.user_id
+            """,
+            write={
+                "snowflake": """SELECT
+  uc.user_id,
+  uc.start_ts AS ts,
+  CASE
+    WHEN CAST(uc.start_ts AS DATE) >= '2023-01-01'
+    AND uc.country_code IN ('US')
+    AND uc.user_id <> ALL (
+      SELECT DISTINCT
+        _id
+      FROM users, LATERAL IFF(_u.pos = _u_2.pos_2, _u_2.entity, NULL) AS datasource(SEQ, KEY, PATH, INDEX, VALUE, THIS)
+      WHERE
+        GET_PATH(datasource.value, 'name') = 'something'
+    )
+    THEN 'Sample1'
+    ELSE 'Sample2'
+  END AS entity
+FROM user_countries AS uc
+LEFT JOIN (
+  SELECT
+    user_id,
+    MAX(IFF(service_entity IS NULL, 1, 0)) AS le_null
+  FROM accepted_user_agreements
+  GROUP BY
+    1
+) AS aua
+  ON uc.user_id = aua.user_id
+CROSS JOIN TABLE(FLATTEN(INPUT => ARRAY_GENERATE_RANGE(0, (
+  GREATEST(ARRAY_SIZE(INPUT => PARSE_JSON(flags))) - 1
+) + 1))) AS _u(seq, key, path, index, pos, this)
+CROSS JOIN TABLE(FLATTEN(INPUT => PARSE_JSON(flags))) AS _u_2(seq, key, path, pos_2, entity, this)
+WHERE
+  _u.pos = _u_2.pos_2
+  OR (
+    _u.pos > (
+      ARRAY_SIZE(INPUT => PARSE_JSON(flags)) - 1
+    )
+    AND _u_2.pos_2 = (
+      ARRAY_SIZE(INPUT => PARSE_JSON(flags)) - 1
+    )
+  )""",
             },
             pretty=True,
         )
@@ -1773,7 +1949,6 @@ FROM persons AS p, LATERAL FLATTEN(input => p.c, path => 'contact') AS _flattene
             "REGEXP_SUBSTR(subject, pattern)",
             read={
                 "bigquery": "REGEXP_EXTRACT(subject, pattern)",
-                "snowflake": "REGEXP_EXTRACT(subject, pattern)",
             },
             write={
                 "bigquery": "REGEXP_EXTRACT(subject, pattern)",
@@ -1799,13 +1974,17 @@ FROM persons AS p, LATERAL FLATTEN(input => p.c, path => 'contact') AS _flattene
         self.validate_all(
             "REGEXP_SUBSTR(subject, pattern, 1, 1, 'c', group)",
             read={
-                "bigquery": "REGEXP_SUBSTR(subject, pattern, 1, 1, 'c', group)",
                 "duckdb": "REGEXP_EXTRACT(subject, pattern, group)",
                 "hive": "REGEXP_EXTRACT(subject, pattern, group)",
                 "presto": "REGEXP_EXTRACT(subject, pattern, group)",
                 "snowflake": "REGEXP_SUBSTR(subject, pattern, 1, 1, 'c', group)",
                 "spark": "REGEXP_EXTRACT(subject, pattern, group)",
             },
+        )
+
+        self.validate_identity(
+            "REGEXP_SUBSTR_ALL(subject, pattern)",
+            "REGEXP_EXTRACT_ALL(subject, pattern)",
         )
 
     @mock.patch("hex.sqlglot.generator.logger")
@@ -1902,6 +2081,40 @@ MATCH_RECOGNIZE (
         self.validate_identity("SHOW USERS")
         self.validate_identity("SHOW TERSE USERS")
         self.validate_identity("SHOW USERS LIKE '_foo%' STARTS WITH 'bar' LIMIT 5 FROM 'baz'")
+
+    def test_show_databases(self):
+        self.validate_identity("SHOW TERSE DATABASES")
+        self.validate_identity(
+            "SHOW TERSE DATABASES HISTORY LIKE 'foo' STARTS WITH 'bla' LIMIT 5 FROM 'bob' WITH PRIVILEGES USAGE, MODIFY"
+        )
+
+        ast = parse_one("SHOW DATABASES IN ACCOUNT", read="snowflake")
+        self.assertEqual(ast.this, "DATABASES")
+        self.assertEqual(ast.args.get("scope_kind"), "ACCOUNT")
+
+    def test_show_functions(self):
+        self.validate_identity("SHOW FUNCTIONS")
+        self.validate_identity("SHOW FUNCTIONS LIKE 'foo' IN CLASS bla")
+
+        ast = parse_one("SHOW FUNCTIONS IN ACCOUNT", read="snowflake")
+        self.assertEqual(ast.this, "FUNCTIONS")
+        self.assertEqual(ast.args.get("scope_kind"), "ACCOUNT")
+
+    def test_show_procedures(self):
+        self.validate_identity("SHOW PROCEDURES")
+        self.validate_identity("SHOW PROCEDURES LIKE 'foo' IN APPLICATION app")
+        self.validate_identity("SHOW PROCEDURES LIKE 'foo' IN APPLICATION PACKAGE pkg")
+
+        ast = parse_one("SHOW PROCEDURES IN ACCOUNT", read="snowflake")
+        self.assertEqual(ast.this, "PROCEDURES")
+        self.assertEqual(ast.args.get("scope_kind"), "ACCOUNT")
+
+    def test_show_warehouses(self):
+        self.validate_identity("SHOW WAREHOUSES")
+        self.validate_identity("SHOW WAREHOUSES LIKE 'foo' WITH PRIVILEGES USAGE, MODIFY")
+
+        ast = parse_one("SHOW WAREHOUSES", read="snowflake")
+        self.assertEqual(ast.this, "WAREHOUSES")
 
     def test_show_schemas(self):
         self.validate_identity(
@@ -2173,6 +2386,43 @@ SINGLE = TRUE""",
             """COPY INTO 's3://example/contacts.csv' FROM "db"."tbl" STORAGE_INTEGRATION = "PROD_S3_SIDETRADE_INTEGRATION" FILE_FORMAT = (FORMAT_NAME="my_csv_format" TYPE=CSV COMPRESSION=NONE NULL_IF=('') FIELD_OPTIONALLY_ENCLOSED_BY='"') MATCH_BY_COLUMN_NAME = CASE_SENSITIVE OVERWRITE = TRUE SINGLE = TRUE INCLUDE_METADATA = ("col1" = "METADATA$START_SCAN_TIME")""",
         )
 
+    def test_put_to_stage(self):
+        # PUT with file path and stage ref containing spaces (wrapped in single quotes)
+        ast = parse_one("PUT 'file://my file.txt' '@s1/my folder'", read="snowflake")
+        self.assertIsInstance(ast, exp.Put)
+        self.assertEqual(ast.this, exp.Literal(this="file://my file.txt", is_string=True))
+        self.assertEqual(ast.args["target"], exp.Var(this="@s1/my folder"))
+
+        # expression with additional properties
+        ast = parse_one(
+            "PUT 'file:///tmp/my.txt' @stage1/folder PARALLEL = 1 AUTO_COMPRESS=false source_compression=gzip OVERWRITE=TRUE",
+            read="snowflake",
+        )
+        self.assertIsInstance(ast, exp.Put)
+        self.assertEqual(ast.this, exp.Literal(this="file:///tmp/my.txt", is_string=True))
+        self.assertEqual(ast.args["target"], exp.Var(this="@stage1/folder"))
+        properties = ast.args.get("properties")
+        props_dict = {prop.this.this: prop.args["value"].this for prop in properties.expressions}
+        self.assertEqual(
+            props_dict,
+            {
+                "PARALLEL": "1",
+                "AUTO_COMPRESS": False,
+                "source_compression": "gzip",
+                "OVERWRITE": True,
+            },
+        )
+
+        # validate identity for different args and properties
+        self.validate_identity("PUT 'file:///dir/tmp.csv' @s1/test")
+
+        # the unquoted URI variant is not fully supported yet
+        self.validate_identity("PUT file:///dir/tmp.csv @%table", check_command_warning=True)
+        self.validate_identity(
+            "PUT file:///dir/tmp.csv @s1/test PARALLEL=1 AUTO_COMPRESS=FALSE source_compression=gzip OVERWRITE=TRUE",
+            check_command_warning=True,
+        )
+
     def test_querying_semi_structured_data(self):
         self.validate_identity("SELECT $1")
         self.validate_identity("SELECT $1.elem")
@@ -2236,3 +2486,38 @@ SINGLE = TRUE""",
         self.validate_identity(
             "GRANT ALL PRIVILEGES ON FUNCTION mydb.myschema.ADD5(number) TO ROLE analyst"
         )
+
+    def test_window_function_arg(self):
+        query = "SELECT * FROM TABLE(db.schema.FUNC(a) OVER ())"
+
+        ast = self.parse_one(query)
+        window = ast.find(exp.Window)
+
+        self.assertEqual(ast.sql("snowflake"), query)
+        self.assertEqual(len(list(ast.find_all(exp.Column))), 1)
+        self.assertEqual(window.this.sql("snowflake"), "db.schema.FUNC(a)")
+
+    def test_offset_without_limit(self):
+        self.validate_all(
+            "SELECT 1 ORDER BY 1 LIMIT NULL OFFSET 0",
+            read={
+                "trino": "SELECT 1 ORDER BY 1 OFFSET 0",
+            },
+        )
+
+    def test_listagg(self):
+        self.validate_identity("LISTAGG(data['some_field'], ',')")
+
+        for distinct in ("", "DISTINCT "):
+            self.validate_all(
+                f"SELECT LISTAGG({distinct}col, '|SEPARATOR|') WITHIN GROUP (ORDER BY col2) FROM t",
+                read={
+                    "trino": f"SELECT LISTAGG({distinct}col, '|SEPARATOR|') WITHIN GROUP (ORDER BY col2) FROM t",
+                    "duckdb": f"SELECT LISTAGG({distinct}col, '|SEPARATOR|' ORDER BY col2) FROM t",
+                },
+                write={
+                    "snowflake": f"SELECT LISTAGG({distinct}col, '|SEPARATOR|') WITHIN GROUP (ORDER BY col2) FROM t",
+                    "trino": f"SELECT LISTAGG({distinct}col, '|SEPARATOR|') WITHIN GROUP (ORDER BY col2) FROM t",
+                    "duckdb": f"SELECT LISTAGG({distinct}col, '|SEPARATOR|' ORDER BY col2) FROM t",
+                },
+            )

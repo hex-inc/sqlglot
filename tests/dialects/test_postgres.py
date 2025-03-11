@@ -49,9 +49,12 @@ class TestPostgres(Validator):
         self.validate_identity("CAST(x AS DATERANGE)")
         self.validate_identity("CAST(x AS DATEMULTIRANGE)")
         self.validate_identity("x$")
+        self.validate_identity("LENGTH(x)")
+        self.validate_identity("LENGTH(x, utf8)")
+        self.validate_identity("CHAR_LENGTH(x)", "LENGTH(x)")
+        self.validate_identity("CHARACTER_LENGTH(x)", "LENGTH(x)")
         self.validate_identity("SELECT ARRAY[1, 2, 3]")
         self.validate_identity("SELECT ARRAY(SELECT 1)")
-        self.validate_identity("SELECT ARRAY_LENGTH(ARRAY[1, 2, 3], 1)")
         self.validate_identity("STRING_AGG(x, y)")
         self.validate_identity("STRING_AGG(x, ',' ORDER BY y)")
         self.validate_identity("STRING_AGG(x, ',' ORDER BY y DESC)")
@@ -70,8 +73,18 @@ class TestPostgres(Validator):
         self.validate_identity("SELECT * FROM r CROSS JOIN LATERAL UNNEST(ARRAY[1]) AS s(location)")
         self.validate_identity("CAST(1 AS DECIMAL) / CAST(2 AS DECIMAL) * -100")
         self.validate_identity("EXEC AS myfunc @id = 123", check_command_warning=True)
+        self.validate_identity("SELECT CURRENT_SCHEMA")
         self.validate_identity("SELECT CURRENT_USER")
         self.validate_identity("SELECT * FROM ONLY t1")
+        self.validate_identity(
+            "SELECT id, name FROM xml_data AS t, XMLTABLE('/root/user' PASSING t.xml COLUMNS id INT PATH '@id', name TEXT PATH 'name/text()') AS x"
+        )
+        self.validate_identity(
+            "SELECT id, value FROM xml_content AS t, XMLTABLE(XMLNAMESPACES('http://example.com/ns1' AS ns1, 'http://example.com/ns2' AS ns2), '/root/data' PASSING t.xml COLUMNS id INT PATH '@ns1:id', value TEXT PATH 'ns2:value/text()') AS x"
+        )
+        self.validate_identity(
+            "SELECT * FROM t WHERE some_column >= CURRENT_DATE + INTERVAL '1 day 1 hour' AND some_another_column IS TRUE"
+        )
         self.validate_identity(
             """UPDATE "x" SET "y" = CAST('0 days 60.000000 seconds' AS INTERVAL) WHERE "x"."id" IN (2, 3)"""
         )
@@ -129,16 +142,8 @@ class TestPostgres(Validator):
             "ORDER BY 2, 3"
         )
         self.validate_identity(
-            "/*+ some comment*/ SELECT b.foo, b.bar FROM baz AS b",
-            "/* + some comment */ SELECT b.foo, b.bar FROM baz AS b",
-        )
-        self.validate_identity(
             "SELECT ARRAY[1, 2, 3] <@ ARRAY[1, 2]",
             "SELECT ARRAY[1, 2] @> ARRAY[1, 2, 3]",
-        )
-        self.validate_identity(
-            "SELECT ARRAY[]::INT[] AS foo",
-            "SELECT CAST(ARRAY[] AS INT[]) AS foo",
         )
         self.validate_identity(
             "SELECT DATE_PART('isodow'::varchar(6), current_date)",
@@ -340,7 +345,36 @@ class TestPostgres(Validator):
             "CAST(x AS INT8)",
             "CAST(x AS BIGINT)",
         )
+        self.validate_identity(
+            """
+            WITH
+              json_data AS (SELECT '{"field_id": [1, 2, 3]}'::JSON AS data),
+              field_ids AS (SELECT 'field_id' AS field_id)
 
+            SELECT
+                JSON_ARRAY_ELEMENTS(json_data.data -> field_ids.field_id) AS element
+            FROM json_data, field_ids
+            """,
+            """WITH json_data AS (
+  SELECT
+    CAST('{"field_id": [1, 2, 3]}' AS JSON) AS data
+), field_ids AS (
+  SELECT
+    'field_id' AS field_id
+)
+SELECT
+  JSON_ARRAY_ELEMENTS(JSON_EXTRACT_PATH(json_data.data, field_ids.field_id)) AS element
+FROM json_data, field_ids""",
+            pretty=True,
+        )
+
+        self.validate_all(
+            "SELECT ARRAY[]::INT[] AS foo",
+            write={
+                "postgres": "SELECT CAST(ARRAY[] AS INT[]) AS foo",
+                "duckdb": "SELECT CAST([] AS INT[]) AS foo",
+            },
+        )
         self.validate_all(
             "STRING_TO_ARRAY('xx~^~yy~^~zz', '~^~', 'yy')",
             read={
@@ -683,6 +717,11 @@ class TestPostgres(Validator):
             """SELECT TRIM(TRAILING ' XXX ' COLLATE "de_DE")""",
             """SELECT RTRIM(' XXX ' COLLATE "de_DE")""",
         )
+        self.validate_identity("LEVENSHTEIN(col1, col2)")
+        self.validate_identity("LEVENSHTEIN_LESS_EQUAL(col1, col2, 1)")
+        self.validate_identity("LEVENSHTEIN(col1, col2, 1, 2, 3)")
+        self.validate_identity("LEVENSHTEIN_LESS_EQUAL(col1, col2, 1, 2, 3, 4)")
+
         self.validate_all(
             """'{"a":1,"b":2}'::json->'b'""",
             write={
@@ -797,6 +836,57 @@ class TestPostgres(Validator):
         self.validate_identity("SELECT OVERLAY(a PLACING b FROM 1 FOR 1)")
         self.validate_identity("ARRAY[1, 2, 3] && ARRAY[1, 2]").assert_is(exp.ArrayOverlaps)
 
+        self.validate_all(
+            """SELECT JSONB_EXISTS('{"a": [1,2,3]}', 'a')""",
+            write={
+                "postgres": """SELECT JSONB_EXISTS('{"a": [1,2,3]}', 'a')""",
+                "duckdb": """SELECT JSON_EXISTS('{"a": [1,2,3]}', '$.a')""",
+            },
+        )
+        self.validate_all(
+            "WITH t AS (SELECT ARRAY[1, 2, 3] AS col) SELECT * FROM t WHERE 1 <= ANY(col) AND 2 = ANY(col)",
+            write={
+                "postgres": "WITH t AS (SELECT ARRAY[1, 2, 3] AS col) SELECT * FROM t WHERE 1 <= ANY(col) AND 2 = ANY(col)",
+                "hive": "WITH t AS (SELECT ARRAY(1, 2, 3) AS col) SELECT * FROM t WHERE EXISTS(col, x -> 1 <= x) AND EXISTS(col, x -> 2 = x)",
+                "spark2": "WITH t AS (SELECT ARRAY(1, 2, 3) AS col) SELECT * FROM t WHERE EXISTS(col, x -> 1 <= x) AND EXISTS(col, x -> 2 = x)",
+                "spark": "WITH t AS (SELECT ARRAY(1, 2, 3) AS col) SELECT * FROM t WHERE EXISTS(col, x -> 1 <= x) AND EXISTS(col, x -> 2 = x)",
+                "databricks": "WITH t AS (SELECT ARRAY(1, 2, 3) AS col) SELECT * FROM t WHERE EXISTS(col, x -> 1 <= x) AND EXISTS(col, x -> 2 = x)",
+            },
+        )
+
+        self.validate_identity(
+            "/*+ some comment*/ SELECT b.foo, b.bar FROM baz AS b",
+            "/* + some comment */ SELECT b.foo, b.bar FROM baz AS b",
+        )
+
+        self.validate_identity(
+            "SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY a) FILTER(WHERE CAST(b AS BOOLEAN)) AS mean_value FROM (VALUES (0, 't')) AS fake_data(a, b)"
+        )
+
+        self.validate_all(
+            "SELECT JSON_OBJECT_AGG(k, v) FROM t",
+            write={
+                "postgres": "SELECT JSON_OBJECT_AGG(k, v) FROM t",
+                "duckdb": "SELECT JSON_GROUP_OBJECT(k, v) FROM t",
+            },
+        )
+
+        self.validate_all(
+            "SELECT JSONB_OBJECT_AGG(k, v) FROM t",
+            write={
+                "postgres": "SELECT JSONB_OBJECT_AGG(k, v) FROM t",
+                "duckdb": "SELECT JSON_GROUP_OBJECT(k, v) FROM t",
+            },
+        )
+
+        self.validate_all(
+            "SELECT DATE_BIN('30 days', timestamp_col, (SELECT MIN(TIMESTAMP) from table)) FROM table",
+            write={
+                "postgres": "SELECT DATE_BIN('30 days', timestamp_col, (SELECT MIN(TIMESTAMP) FROM table)) FROM table",
+                "duckdb": 'SELECT TIME_BUCKET(\'30 days\', timestamp_col, (SELECT MIN(TIMESTAMP) FROM "table")) FROM "table"',
+            },
+        )
+
     def test_ddl(self):
         # Checks that user-defined types are parsed into DataType instead of Identifier
         self.parse_one("CREATE TABLE t (a udt)").this.expressions[0].args["kind"].assert_is(
@@ -848,6 +938,9 @@ class TestPostgres(Validator):
         self.validate_identity("ALTER TABLE t1 SET ACCESS METHOD method")
         self.validate_identity("ALTER TABLE t1 SET TABLESPACE tablespace")
         self.validate_identity("ALTER TABLE t1 SET (fillfactor = 5, autovacuum_enabled = TRUE)")
+        self.validate_identity(
+            "INSERT INTO newtable AS t(a, b, c) VALUES (1, 2, 3) ON CONFLICT(c) DO UPDATE SET a = t.a + 1 WHERE t.a < 1"
+        )
         self.validate_identity(
             "ALTER TABLE tested_table ADD CONSTRAINT unique_example UNIQUE (column_name) NOT VALID"
         )
@@ -1017,13 +1110,15 @@ class TestPostgres(Validator):
                 "duckdb": "CREATE TABLE x (a UUID, b BLOB)",
                 "presto": "CREATE TABLE x (a UUID, b VARBINARY)",
                 "hive": "CREATE TABLE x (a UUID, b BINARY)",
-                "spark": "CREATE TABLE x (a UUID, b BINARY)",
+                "spark": "CREATE TABLE x (a STRING, b BINARY)",
+                "tsql": "CREATE TABLE x (a UNIQUEIDENTIFIER, b VARBINARY)",
             },
         )
 
         self.validate_identity("CREATE TABLE tbl (col INT UNIQUE NULLS NOT DISTINCT DEFAULT 9.99)")
         self.validate_identity("CREATE TABLE tbl (col UUID UNIQUE DEFAULT GEN_RANDOM_UUID())")
         self.validate_identity("CREATE TABLE tbl (col UUID, UNIQUE NULLS NOT DISTINCT (col))")
+        self.validate_identity("CREATE TABLE tbl (col_a INT GENERATED ALWAYS AS (1 + 2) STORED)")
 
         self.validate_identity("CREATE INDEX CONCURRENTLY ix_table_id ON tbl USING btree(id)")
         self.validate_identity(
@@ -1219,3 +1314,101 @@ CROSS JOIN JSON_ARRAY_ELEMENTS(CAST(JSON_EXTRACT_PATH(tbox, 'boxes') AS JSON)) A
         self.validate_identity(
             """SELECT * FROM table1, ROWS FROM (FUNC1(col1) AS alias1("col1" TEXT)) WITH ORDINALITY AS alias3("col3" INT, "col4" TEXT)"""
         )
+
+    def test_array_length(self):
+        self.validate_identity("SELECT ARRAY_LENGTH(ARRAY[1, 2, 3], 1)")
+
+        self.validate_all(
+            "ARRAY_LENGTH(arr, 1)",
+            read={
+                "bigquery": "ARRAY_LENGTH(arr)",
+                "duckdb": "ARRAY_LENGTH(arr)",
+                "presto": "CARDINALITY(arr)",
+                "drill": "REPEATED_COUNT(arr)",
+                "teradata": "CARDINALITY(arr)",
+                "hive": "SIZE(arr)",
+                "spark2": "SIZE(arr)",
+                "spark": "SIZE(arr)",
+                "databricks": "SIZE(arr)",
+            },
+            write={
+                "duckdb": "ARRAY_LENGTH(arr, 1)",
+                "presto": "CARDINALITY(arr)",
+                "teradata": "CARDINALITY(arr)",
+                "bigquery": "ARRAY_LENGTH(arr)",
+                "drill": "REPEATED_COUNT(arr)",
+                "clickhouse": "LENGTH(arr)",
+                "hive": "SIZE(arr)",
+                "spark2": "SIZE(arr)",
+                "spark": "SIZE(arr)",
+                "databricks": "SIZE(arr)",
+            },
+        )
+
+        self.validate_all(
+            "ARRAY_LENGTH(arr, foo)",
+            write={
+                "duckdb": "ARRAY_LENGTH(arr, foo)",
+                "hive": UnsupportedError,
+                "spark2": UnsupportedError,
+                "spark": UnsupportedError,
+                "databricks": UnsupportedError,
+                "presto": UnsupportedError,
+                "teradata": UnsupportedError,
+                "bigquery": UnsupportedError,
+                "drill": UnsupportedError,
+                "clickhouse": UnsupportedError,
+            },
+        )
+
+    def test_xmlelement(self):
+        self.validate_identity("SELECT XMLELEMENT(NAME foo)")
+        self.validate_identity("SELECT XMLELEMENT(NAME foo, XMLATTRIBUTES('xyz' AS bar))")
+        self.validate_identity("SELECT XMLELEMENT(NAME test, XMLATTRIBUTES(a, b)) FROM test")
+        self.validate_identity(
+            "SELECT XMLELEMENT(NAME foo, XMLATTRIBUTES(CURRENT_DATE AS bar), 'cont', 'ent')"
+        )
+        self.validate_identity(
+            """SELECT XMLELEMENT(NAME "foo$bar", XMLATTRIBUTES('xyz' AS "a&b"))"""
+        )
+        self.validate_identity(
+            "SELECT XMLELEMENT(NAME foo, XMLATTRIBUTES('xyz' AS bar), XMLELEMENT(NAME abc), XMLCOMMENT('test'), XMLELEMENT(NAME xyz))"
+        )
+
+    def test_analyze(self):
+        self.validate_identity("ANALYZE TBL")
+        self.validate_identity("ANALYZE TBL(col1, col2)")
+        self.validate_identity("ANALYZE VERBOSE SKIP_LOCKED TBL(col1, col2)")
+        self.validate_identity("ANALYZE BUFFER_USAGE_LIMIT 1337 TBL")
+
+    def test_recursive_cte(self):
+        for kind in ("BREADTH", "DEPTH"):
+            self.validate_identity(
+                f"WITH RECURSIVE search_tree(id, link, data) AS (SELECT t.id, t.link, t.data FROM tree AS t UNION ALL SELECT t.id, t.link, t.data FROM tree AS t, search_tree AS st WHERE t.id = st.link) SEARCH {kind} FIRST BY id SET ordercol SELECT * FROM search_tree ORDER BY ordercol"
+            )
+
+        self.validate_identity(
+            "WITH RECURSIVE search_graph(id, link, data, depth) AS (SELECT g.id, g.link, g.data, 1 FROM graph AS g UNION ALL SELECT g.id, g.link, g.data, sg.depth + 1 FROM graph AS g, search_graph AS sg WHERE g.id = sg.link) CYCLE id SET is_cycle USING path SELECT * FROM search_graph"
+        )
+
+    def test_json_extract(self):
+        for arrow_op in ("->", "->>"):
+            with self.subTest(f"Ensure {arrow_op} operator roundtrips int values as subscripts"):
+                self.validate_all(
+                    f"SELECT foo {arrow_op} 1",
+                    write={
+                        "postgres": f"SELECT foo {arrow_op} 1",
+                        "duckdb": f"SELECT foo {arrow_op} '$[1]'",
+                    },
+                )
+
+            with self.subTest(
+                f"Ensure {arrow_op} operator roundtrips string values that represent integers as keys"
+            ):
+                self.validate_all(
+                    f"SELECT foo {arrow_op} '12'",
+                    write={
+                        "postgres": f"SELECT foo {arrow_op} '12'",
+                        "clickhouse": "SELECT JSONExtractString(foo, '12')",
+                    },
+                )

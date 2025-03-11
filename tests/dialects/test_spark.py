@@ -9,6 +9,8 @@ class TestSpark(Validator):
     dialect = "spark"
 
     def test_ddl(self):
+        self.validate_identity("DROP NAMESPACE my_catalog.my_namespace")
+        self.validate_identity("CREATE NAMESPACE my_catalog.my_namespace")
         self.validate_identity("INSERT OVERWRITE TABLE db1.tb1 TABLE db2.tb2")
         self.validate_identity("CREATE TABLE foo AS WITH t AS (SELECT 1 AS col) SELECT col FROM t")
         self.validate_identity("CREATE TEMPORARY VIEW test AS SELECT 1")
@@ -148,6 +150,8 @@ TBLPROPERTIES (
                 "hive": "TO_DATE(x)",
                 "presto": "CAST(CAST(x AS TIMESTAMP) AS DATE)",
                 "spark": "TO_DATE(x)",
+                "snowflake": "TRY_TO_DATE(x, 'yyyy-mm-DD')",
+                "databricks": "TO_DATE(x)",
             },
         )
         self.validate_all(
@@ -157,6 +161,8 @@ TBLPROPERTIES (
                 "hive": "TO_DATE(x, 'yyyy')",
                 "presto": "CAST(DATE_PARSE(x, '%Y') AS DATE)",
                 "spark": "TO_DATE(x, 'yyyy')",
+                "snowflake": "TRY_TO_DATE(x, 'yyyy')",
+                "databricks": "TO_DATE(x, 'yyyy')",
             },
         )
 
@@ -262,6 +268,14 @@ TBLPROPERTIES (
         self.validate_identity("TRIM(TRAILING 'SL' FROM 'SSparkSQLS')")
         self.validate_identity("SPLIT(str, pattern, lim)")
         self.validate_identity(
+            "SELECT 1 limit",
+            "SELECT 1 AS limit",
+        )
+        self.validate_identity(
+            "SELECT 1 offset",
+            "SELECT 1 AS offset",
+        )
+        self.validate_identity(
             "SELECT UNIX_TIMESTAMP()",
             "SELECT UNIX_TIMESTAMP(CURRENT_TIMESTAMP())",
         )
@@ -302,7 +316,8 @@ TBLPROPERTIES (
             write={
                 "databricks": "SELECT TRY_ELEMENT_AT(ARRAY(1, 2, 3), 2)",
                 "spark": "SELECT TRY_ELEMENT_AT(ARRAY(1, 2, 3), 2)",
-                "duckdb": "SELECT ([1, 2, 3])[2]",
+                "duckdb": "SELECT [1, 2, 3][2]",
+                "duckdb, version=1.1.0": "SELECT ([1, 2, 3])[2]",
                 "presto": "SELECT ELEMENT_AT(ARRAY[1, 2, 3], 2)",
             },
         )
@@ -315,10 +330,24 @@ TBLPROPERTIES (
             },
         )
         self.validate_all(
+            "SELECT ARRAY_AGG(1)",
+            write={
+                "duckdb": "SELECT ARRAY_AGG(1)",
+                "spark": "SELECT COLLECT_LIST(1)",
+            },
+        )
+        self.validate_all(
+            "SELECT ARRAY_AGG(DISTINCT STRUCT('a'))",
+            write={
+                "duckdb": "SELECT ARRAY_AGG(DISTINCT {'col1': 'a'})",
+                "spark": "SELECT COLLECT_LIST(DISTINCT STRUCT('a' AS col1))",
+            },
+        )
+        self.validate_all(
             "SELECT DATE_FORMAT(DATE '2020-01-01', 'EEEE') AS weekday",
             write={
                 "presto": "SELECT DATE_FORMAT(CAST(CAST('2020-01-01' AS DATE) AS TIMESTAMP), '%W') AS weekday",
-                "spark": "SELECT DATE_FORMAT(CAST(CAST('2020-01-01' AS DATE) AS TIMESTAMP), 'EEEE') AS weekday",
+                "spark": "SELECT DATE_FORMAT(CAST('2020-01-01' AS DATE), 'EEEE') AS weekday",
             },
         )
         self.validate_all(
@@ -328,7 +357,8 @@ TBLPROPERTIES (
             },
             write={
                 "databricks": "SELECT TRY_ELEMENT_AT(MAP(1, 'a', 2, 'b'), 2)",
-                "duckdb": "SELECT (MAP([1, 2], ['a', 'b'])[2])[1]",
+                "duckdb": "SELECT MAP([1, 2], ['a', 'b'])[2]",
+                "duckdb, version=1.1.0": "SELECT (MAP([1, 2], ['a', 'b'])[2])[1]",
                 "spark": "SELECT TRY_ELEMENT_AT(MAP(1, 'a', 2, 'b'), 2)",
             },
         )
@@ -740,6 +770,27 @@ TBLPROPERTIES (
             },
         )
 
+        self.validate_all(
+            "SELECT TIMESTAMPDIFF(MONTH, foo, bar)",
+            read={
+                "databricks": "SELECT TIMESTAMPDIFF(MONTH, foo, bar)",
+            },
+            write={
+                "spark": "SELECT TIMESTAMPDIFF(MONTH, foo, bar)",
+                "databricks": "SELECT TIMESTAMPDIFF(MONTH, foo, bar)",
+            },
+        )
+
+        self.validate_all(
+            "SELECT CAST(col AS TIMESTAMP)",
+            write={
+                "spark2": "SELECT CAST(col AS TIMESTAMP)",
+                "spark": "SELECT CAST(col AS TIMESTAMP)",
+                "databricks": "SELECT TRY_CAST(col AS TIMESTAMP)",
+                "duckdb": "SELECT TRY_CAST(col AS TIMESTAMPTZ)",
+            },
+        )
+
     def test_bool_or(self):
         self.validate_all(
             "SELECT a, LOGICAL_OR(b) FROM table GROUP BY a",
@@ -874,4 +925,22 @@ TBLPROPERTIES (
                 "spark": "SELECT * FROM db.table1 EXCEPT SELECT * FROM db.table2",
                 "databricks": "SELECT * FROM db.table1 EXCEPT SELECT * FROM db.table2",
             },
+        )
+
+    def test_string(self):
+        for dialect in ("hive", "spark2", "spark", "databricks"):
+            with self.subTest(f"Testing STRING() for {dialect}"):
+                query = parse_one("STRING(a)", dialect=dialect)
+                self.assertEqual(query.sql(dialect), "CAST(a AS STRING)")
+
+    def test_analyze(self):
+        self.validate_identity("ANALYZE TABLE tbl COMPUTE STATISTICS NOSCAN")
+        self.validate_identity("ANALYZE TABLE tbl COMPUTE STATISTICS FOR ALL COLUMNS")
+        self.validate_identity("ANALYZE TABLE tbl COMPUTE STATISTICS FOR COLUMNS foo, bar")
+        self.validate_identity("ANALYZE TABLE ctlg.db.tbl COMPUTE STATISTICS NOSCAN")
+        self.validate_identity("ANALYZE TABLES COMPUTE STATISTICS NOSCAN")
+        self.validate_identity("ANALYZE TABLES FROM db COMPUTE STATISTICS")
+        self.validate_identity("ANALYZE TABLES IN db COMPUTE STATISTICS")
+        self.validate_identity(
+            "ANALYZE TABLE ctlg.db.tbl PARTITION(foo = 'foo', bar = 'bar') COMPUTE STATISTICS NOSCAN"
         )

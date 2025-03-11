@@ -15,18 +15,16 @@ from hex.sqlglot.dialects.dialect import (
     if_sql,
     is_parse_json,
     left_to_substring_sql,
-    locate_to_strposition,
     max_or_greatest,
     min_or_least,
     no_ilike_sql,
     no_recursive_cte_sql,
-    no_safe_divide_sql,
     no_trycast_sql,
     regexp_extract_sql,
     regexp_replace_sql,
     rename_func,
     right_to_substring_sql,
-    strposition_to_locate_sql,
+    strposition_sql,
     struct_extract_sql,
     time_format,
     timestrtotime_sql,
@@ -44,6 +42,7 @@ from hex.sqlglot.transforms import (
 )
 from hex.sqlglot.helper import seq_get
 from hex.sqlglot.tokens import TokenType
+from hex.sqlglot.generator import unsupported_args
 
 # (FuncType, Multiplier)
 DATE_DELTA_INTERVAL = {
@@ -188,6 +187,12 @@ def _build_with_ignore_nulls(
     return _parse
 
 
+def _build_to_date(args: t.List) -> exp.TsOrDsToDate:
+    expr = build_formatted_time(exp.TsOrDsToDate, "hive")(args)
+    expr.set("safe", True)
+    return expr
+
+
 class Hive(Dialect):
     ALIAS_POST_TABLESAMPLE = True
     IDENTIFIERS_CAN_START_WITH_DIGIT = True
@@ -276,6 +281,7 @@ class Hive(Dialect):
 
         FUNCTIONS = {
             **parser.Parser.FUNCTIONS,
+            "ASCII": exp.Unicode.from_arg_list,
             "BASE64": exp.ToBase64.from_arg_list,
             "COLLECT_LIST": lambda args: exp.ArrayAgg(this=seq_get(args, 0), nulls_excluded=True),
             "COLLECT_SET": exp.ArrayUniqueAgg.from_arg_list,
@@ -304,12 +310,12 @@ class Hive(Dialect):
             "GET_JSON_OBJECT": exp.JSONExtractScalar.from_arg_list,
             "LAST": _build_with_ignore_nulls(exp.Last),
             "LAST_VALUE": _build_with_ignore_nulls(exp.LastValue),
-            "LOCATE": locate_to_strposition,
             "MAP": parser.build_var_map,
             "MONTH": lambda args: exp.Month(this=exp.TsOrDsToDate.from_arg_list(args)),
             "PERCENTILE": exp.Quantile.from_arg_list,
             "PERCENTILE_APPROX": exp.ApproxQuantile.from_arg_list,
-            "REGEXP_EXTRACT": build_regexp_extract,
+            "REGEXP_EXTRACT": build_regexp_extract(exp.RegexpExtract),
+            "REGEXP_EXTRACT_ALL": build_regexp_extract(exp.RegexpExtractAll),
             "SEQUENCE": exp.GenerateSeries.from_arg_list,
             "SIZE": exp.ArraySize.from_arg_list,
             "SPLIT": exp.RegexpSplit.from_arg_list,
@@ -318,7 +324,7 @@ class Hive(Dialect):
                 pair_delim=seq_get(args, 1) or exp.Literal.string(","),
                 key_value_delim=seq_get(args, 2) or exp.Literal.string(":"),
             ),
-            "TO_DATE": build_formatted_time(exp.TsOrDsToDate, "hive"),
+            "TO_DATE": _build_to_date,
             "TO_JSON": exp.JSONFormat.from_arg_list,
             "TRUNC": exp.TimestampTrunc.from_arg_list,
             "UNBASE64": exp.FromBase64.from_arg_list,
@@ -460,6 +466,8 @@ class Hive(Dialect):
         WITH_PROPERTIES_PREFIX = "TBLPROPERTIES"
         PARSE_JSON_NAME = None
         PAD_FILL_PATTERN_IS_REQUIRED = True
+        SUPPORTS_MEDIAN = False
+        ARRAY_SIZE_NAME = "SIZE"
 
         EXPRESSIONS_WITHOUT_NESTED_CTES = {
             exp.Insert,
@@ -478,6 +486,7 @@ class Hive(Dialect):
         TYPE_MAPPING = {
             **generator.Generator.TYPE_MAPPING,
             exp.DataType.Type.BIT: "BOOLEAN",
+            exp.DataType.Type.BLOB: "BINARY",
             exp.DataType.Type.DATETIME: "TIMESTAMP",
             exp.DataType.Type.ROWVERSION: "BINARY",
             exp.DataType.Type.TEXT: "STRING",
@@ -497,7 +506,6 @@ class Hive(Dialect):
             exp.ArgMin: arg_max_or_min_no_count("MIN_BY"),
             exp.ArrayConcat: rename_func("CONCAT"),
             exp.ArrayToString: lambda self, e: self.func("CONCAT_WS", e.expression, e.this),
-            exp.ArraySize: rename_func("SIZE"),
             exp.ArraySort: _array_sort_sql,
             exp.With: no_recursive_cte_sql,
             exp.DateAdd: _add_date_sql,
@@ -510,6 +518,7 @@ class Hive(Dialect):
             e: f"TO_DATE(CAST({self.sql(e, 'this')} AS STRING), {Hive.DATEINT_FORMAT})",
             exp.FileFormatProperty: lambda self,
             e: f"STORED AS {self.sql(e, 'this') if isinstance(e.this, exp.InputOutputFormat) else e.name.upper()}",
+            exp.StorageHandlerProperty: lambda self, e: f"STORED BY {self.sql(e, 'this')}",
             exp.FromBase64: rename_func("UNBASE64"),
             exp.GenerateSeries: sequence_sql,
             exp.GenerateDateArray: sequence_sql,
@@ -541,11 +550,11 @@ class Hive(Dialect):
             exp.Quantile: rename_func("PERCENTILE"),
             exp.ApproxQuantile: rename_func("PERCENTILE_APPROX"),
             exp.RegexpExtract: regexp_extract_sql,
+            exp.RegexpExtractAll: regexp_extract_sql,
             exp.RegexpReplace: regexp_replace_sql,
             exp.RegexpLike: lambda self, e: self.binary(e, "RLIKE"),
             exp.RegexpSplit: rename_func("SPLIT"),
             exp.Right: right_to_substring_sql,
-            exp.SafeDivide: no_safe_divide_sql,
             exp.SchemaCommentProperty: lambda self, e: self.naked_property(e),
             exp.ArrayUniqueAgg: rename_func("COLLECT_SET"),
             exp.Split: lambda self, e: self.func(
@@ -556,9 +565,12 @@ class Hive(Dialect):
                     transforms.eliminate_qualify,
                     transforms.eliminate_distinct_on,
                     partial(transforms.unnest_to_explode, unnest_using_arrays_zip=False),
+                    transforms.any_to_exists,
                 ]
             ),
-            exp.StrPosition: strposition_to_locate_sql,
+            exp.StrPosition: lambda self, e: strposition_sql(
+                self, e, func_name="LOCATE", supports_position=True
+            ),
             exp.StrToDate: _str_to_date_sql,
             exp.StrToTime: _str_to_time_sql,
             exp.StrToUnix: _str_to_unix_sql,
@@ -568,7 +580,6 @@ class Hive(Dialect):
             exp.TimeStrToTime: timestrtotime_sql,
             exp.TimeStrToUnix: rename_func("UNIX_TIMESTAMP"),
             exp.TimestampTrunc: lambda self, e: self.func("TRUNC", e.this, unit_to_str(e)),
-            exp.TimeToStr: lambda self, e: self.func("DATE_FORMAT", e.this, self.format_time(e)),
             exp.TimeToUnix: rename_func("UNIX_TIMESTAMP"),
             exp.ToBase64: rename_func("BASE64"),
             exp.TsOrDiToDi: lambda self,
@@ -577,6 +588,7 @@ class Hive(Dialect):
             exp.TsOrDsDiff: _date_diff_sql,
             exp.TsOrDsToDate: _to_date_sql,
             exp.TryCast: no_trycast_sql,
+            exp.Unicode: rename_func("ASCII"),
             exp.UnixToStr: lambda self, e: self.func(
                 "FROM_UNIXTIME", e.this, time_format("hive")(self, e)
             ),
@@ -596,6 +608,9 @@ class Hive(Dialect):
             exp.WeekOfYear: rename_func("WEEKOFYEAR"),
             exp.DayOfMonth: rename_func("DAYOFMONTH"),
             exp.DayOfWeek: rename_func("DAYOFWEEK"),
+            exp.Levenshtein: unsupported_args("ins_cost", "del_cost", "sub_cost", "max_dist")(
+                rename_func("LEVENSHTEIN")
+            ),
         }
 
         PROPERTIES_LOCATION = {
@@ -709,3 +724,16 @@ class Hive(Dialect):
             exprs = self.expressions(expression, flat=True)
 
             return f"{prefix}SERDEPROPERTIES ({exprs})"
+
+        def exists_sql(self, expression: exp.Exists) -> str:
+            if expression.expression:
+                return self.function_fallback_sql(expression)
+
+            return super().exists_sql(expression)
+
+        def timetostr_sql(self, expression: exp.TimeToStr) -> str:
+            this = expression.this
+            if isinstance(this, exp.TimeStrToTime):
+                this = this.this
+
+            return self.func("DATE_FORMAT", this, self.format_time(expression))

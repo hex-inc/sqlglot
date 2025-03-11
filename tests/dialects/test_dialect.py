@@ -83,11 +83,20 @@ class TestDialect(Validator):
     maxDiff = None
 
     def test_enum(self):
+        dialect_by_key = Dialect.classes
         for dialect in Dialects:
             self.assertIsNotNone(Dialect[dialect])
             self.assertIsNotNone(Dialect.get(dialect))
             self.assertIsNotNone(Dialect.get_or_raise(dialect))
             self.assertIsNotNone(Dialect[dialect.value])
+            self.assertIn(dialect, dialect_by_key)
+
+    def test_lazy_load(self):
+        import subprocess
+
+        code = "import sqlglot; assert len(sqlglot.Dialect._classes) == 1; print('Success')"
+        result = subprocess.run(["python", "-c", code], capture_output=True, text=True)
+        assert "Success" in result.stdout
 
     def test_get_or_raise(self):
         self.assertIsInstance(Dialect.get_or_raise(Hive), Hive)
@@ -158,6 +167,18 @@ class TestDialect(Validator):
         self.assertTrue(snowflake_object in {"snowflake", "bigquery"})
         self.assertFalse(snowflake_class in {"bigquery", "redshift"})
         self.assertFalse(snowflake_object in {"bigquery", "redshift"})
+
+    def test_compare_dialect_versions(self):
+        ddb_v1 = Dialect.get_or_raise("duckdb, version=1.0")
+        ddb_v1_2 = Dialect.get_or_raise("duckdb, foo=bar, version=1.0")
+        ddb_v2 = Dialect.get_or_raise("duckdb, version=2.2.4")
+        ddb_latest = Dialect.get_or_raise("duckdb")
+
+        self.assertTrue(ddb_latest.version > ddb_v2.version)
+        self.assertTrue(ddb_v1.version < ddb_v2.version)
+
+        self.assertTrue(ddb_v1.version == ddb_v1_2.version)
+        self.assertTrue(ddb_latest.version == Dialect.get_or_raise("duckdb").version)
 
     def test_cast(self):
         self.validate_all(
@@ -314,7 +335,7 @@ class TestDialect(Validator):
                 "materialize": "CAST(a AS SMALLINT)",
                 "mysql": "CAST(a AS SIGNED)",
                 "hive": "CAST(a AS SMALLINT)",
-                "oracle": "CAST(a AS NUMBER)",
+                "oracle": "CAST(a AS SMALLINT)",
                 "postgres": "CAST(a AS SMALLINT)",
                 "presto": "CAST(a AS SMALLINT)",
                 "redshift": "CAST(a AS SMALLINT)",
@@ -374,10 +395,10 @@ class TestDialect(Validator):
                 "mysql": "TIMESTAMP(a)",
             },
         )
-        self.validate_all("CAST(a AS TINYINT)", write={"oracle": "CAST(a AS NUMBER)"})
-        self.validate_all("CAST(a AS SMALLINT)", write={"oracle": "CAST(a AS NUMBER)"})
-        self.validate_all("CAST(a AS BIGINT)", write={"oracle": "CAST(a AS NUMBER)"})
-        self.validate_all("CAST(a AS INT)", write={"oracle": "CAST(a AS NUMBER)"})
+        self.validate_all("CAST(a AS TINYINT)", write={"oracle": "CAST(a AS SMALLINT)"})
+        self.validate_all("CAST(a AS SMALLINT)", write={"oracle": "CAST(a AS SMALLINT)"})
+        self.validate_all("CAST(a AS BIGINT)", write={"oracle": "CAST(a AS INT)"})
+        self.validate_all("CAST(a AS INT)", write={"oracle": "CAST(a AS INT)"})
         self.validate_all(
             "CAST(a AS DECIMAL)",
             read={"oracle": "CAST(a AS NUMBER)"},
@@ -520,13 +541,26 @@ class TestDialect(Validator):
             },
         )
 
+    def test_is_ascii(self):
+        self.validate_all(
+            "SELECT IS_ASCII(x)",
+            write={
+                "": "SELECT IS_ASCII(x)",
+                "sqlite": "SELECT (NOT x GLOB CAST(x'2a5b5e012d7f5d2a' AS TEXT))",
+                "mysql": "SELECT REGEXP_LIKE(x, '^[[:ascii:]]*$')",
+                "postgres": "SELECT (x ~ '^[[:ascii:]]*$')",
+                "tsql": "SELECT (PATINDEX(CONVERT(VARCHAR(MAX), 0x255b5e002d7f5d25) COLLATE Latin1_General_BIN, x) = 0)",
+                "oracle": "SELECT NVL(REGEXP_LIKE(x, '^[' || CHR(1) || '-' || CHR(127) || ']*$'), TRUE)",
+            },
+        )
+
     def test_nvl2(self):
         self.validate_all(
             "SELECT NVL2(a, b, c)",
             write={
                 "": "SELECT NVL2(a, b, c)",
                 "bigquery": "SELECT CASE WHEN NOT a IS NULL THEN b ELSE c END",
-                "clickhouse": "SELECT CASE WHEN NOT a IS NULL THEN b ELSE c END",
+                "clickhouse": "SELECT CASE WHEN NOT (a IS NULL) THEN b ELSE c END",
                 "databricks": "SELECT NVL2(a, b, c)",
                 "doris": "SELECT CASE WHEN NOT a IS NULL THEN b ELSE c END",
                 "drill": "SELECT CASE WHEN NOT a IS NULL THEN b ELSE c END",
@@ -552,7 +586,7 @@ class TestDialect(Validator):
             write={
                 "": "SELECT NVL2(a, b)",
                 "bigquery": "SELECT CASE WHEN NOT a IS NULL THEN b END",
-                "clickhouse": "SELECT CASE WHEN NOT a IS NULL THEN b END",
+                "clickhouse": "SELECT CASE WHEN NOT (a IS NULL) THEN b END",
                 "databricks": "SELECT NVL2(a, b)",
                 "doris": "SELECT CASE WHEN NOT a IS NULL THEN b END",
                 "drill": "SELECT CASE WHEN NOT a IS NULL THEN b END",
@@ -1444,6 +1478,56 @@ class TestDialect(Validator):
             },
         )
 
+        # UNNEST without column alias
+        self.validate_all(
+            "SELECT * FROM x CROSS JOIN UNNEST(y) AS t",
+            write={
+                "presto": "SELECT * FROM x CROSS JOIN UNNEST(y) AS t",
+                "spark": UnsupportedError,
+                "databricks": UnsupportedError,
+            },
+        )
+
+        # UNNEST MAP Object into multiple columns, using single alias
+        self.validate_all(
+            "SELECT a, b FROM x CROSS JOIN UNNEST(y) AS t (a, b)",
+            write={
+                "presto": "SELECT a, b FROM x CROSS JOIN UNNEST(y) AS t(a, b)",
+                "spark": "SELECT a, b FROM x LATERAL VIEW EXPLODE(y) t AS a, b",
+                "hive": "SELECT a, b FROM x LATERAL VIEW EXPLODE(y) t AS a, b",
+            },
+        )
+
+        # Unnest multiple Expression into respective mapped alias
+        self.validate_all(
+            "SELECT numbers, animals, n, a FROM (SELECT ARRAY(2, 5) AS numbers, ARRAY('dog', 'cat', 'bird') AS animals UNION ALL SELECT ARRAY(7, 8, 9), ARRAY('cow', 'pig')) AS x CROSS JOIN UNNEST(numbers, animals) AS t(n, a)",
+            write={
+                "presto": "SELECT numbers, animals, n, a FROM (SELECT ARRAY[2, 5] AS numbers, ARRAY['dog', 'cat', 'bird'] AS animals UNION ALL SELECT ARRAY[7, 8, 9], ARRAY['cow', 'pig']) AS x CROSS JOIN UNNEST(numbers, animals) AS t(n, a)",
+                "spark": "SELECT numbers, animals, n, a FROM (SELECT ARRAY(2, 5) AS numbers, ARRAY('dog', 'cat', 'bird') AS animals UNION ALL SELECT ARRAY(7, 8, 9), ARRAY('cow', 'pig')) AS x LATERAL VIEW INLINE(ARRAYS_ZIP(numbers, animals)) t AS n, a",
+                "hive": UnsupportedError,
+            },
+        )
+
+        # Unnest column to more then 2 alias (STRUCT)
+        self.validate_all(
+            "SELECT a, b, c, d, e FROM x CROSS JOIN UNNEST(y) AS t(a, b, c, d)",
+            write={
+                "presto": "SELECT a, b, c, d, e FROM x CROSS JOIN UNNEST(y) AS t(a, b, c, d)",
+                "spark": UnsupportedError,
+                "hive": UnsupportedError,
+            },
+        )
+
+    def test_multiple_chained_unnest(self):
+        self.validate_all(
+            "SELECT * FROM x CROSS JOIN UNNEST(a) AS j(lista) CROSS JOIN UNNEST(b) AS k(listb) CROSS JOIN UNNEST(c) AS l(listc)",
+            write={
+                "presto": "SELECT * FROM x CROSS JOIN UNNEST(a) AS j(lista) CROSS JOIN UNNEST(b) AS k(listb) CROSS JOIN UNNEST(c) AS l(listc)",
+                "spark": "SELECT * FROM x LATERAL VIEW EXPLODE(a) j AS lista LATERAL VIEW EXPLODE(b) k AS listb LATERAL VIEW EXPLODE(c) l AS listc",
+                "hive": "SELECT * FROM x LATERAL VIEW EXPLODE(a) j AS lista LATERAL VIEW EXPLODE(b) k AS listb LATERAL VIEW EXPLODE(c) l AS listc",
+            },
+        )
+
     def test_lateral_subquery(self):
         self.validate_identity(
             "SELECT art FROM tbl1 INNER JOIN LATERAL (SELECT art FROM tbl2) AS tbl2 ON tbl1.art = tbl2.art"
@@ -1619,40 +1703,202 @@ class TestDialect(Validator):
             },
         )
         self.validate_all(
-            "POSITION(needle in haystack)",
-            write={
-                "drill": "STRPOS(haystack, needle)",
-                "duckdb": "STRPOS(haystack, needle)",
-                "postgres": "STRPOS(haystack, needle)",
-                "presto": "STRPOS(haystack, needle)",
-                "spark": "LOCATE(needle, haystack)",
-                "clickhouse": "position(haystack, needle)",
-                "snowflake": "POSITION(needle, haystack)",
-                "mysql": "LOCATE(needle, haystack)",
+            "STR_POSITION(haystack, needle)",
+            read={
+                "athena": "POSITION(needle in haystack)",
+                "clickhouse": "POSITION(needle in haystack)",
+                "databricks": "POSITION(needle in haystack)",
+                "drill": "POSITION(needle in haystack)",
+                "duckdb": "POSITION(needle in haystack)",
+                "materialize": "POSITION(needle in haystack)",
+                "mysql": "POSITION(needle in haystack)",
+                "postgres": "POSITION(needle in haystack)",
+                "presto": "POSITION(needle in haystack)",
+                "redshift": "POSITION(needle in haystack)",
+                "risingwave": "POSITION(needle in haystack)",
+                "snowflake": "POSITION(needle in haystack)",
+                "spark": "POSITION(needle in haystack)",
+                "spark2": "POSITION(needle in haystack)",
+                "teradata": "POSITION(needle in haystack)",
+                "trino": "POSITION(needle in haystack)",
             },
         )
         self.validate_all(
             "STR_POSITION(haystack, needle)",
-            write={
+            read={
+                "clickhouse": "POSITION(haystack, needle)",
+                "databricks": "POSITION(needle, haystack)",
+                "snowflake": "POSITION(needle, haystack)",
+                "spark2": "POSITION(needle, haystack)",
+            },
+        )
+        self.validate_all(
+            "STR_POSITION(haystack, needle)",
+            read={
+                "athena": "STRPOS(haystack, needle)",
+                "bigquery": "STRPOS(haystack, needle)",
                 "drill": "STRPOS(haystack, needle)",
                 "duckdb": "STRPOS(haystack, needle)",
                 "postgres": "STRPOS(haystack, needle)",
                 "presto": "STRPOS(haystack, needle)",
-                "spark": "LOCATE(needle, haystack)",
-                "clickhouse": "position(haystack, needle)",
-                "snowflake": "POSITION(needle, haystack)",
-                "mysql": "LOCATE(needle, haystack)",
+                "redshift": "STRPOS(haystack, needle)",
+                "trino": "STRPOS(haystack, needle)",
             },
         )
         self.validate_all(
-            "POSITION(needle, haystack, pos)",
+            "STR_POSITION(haystack, needle)",
+            read={
+                "bigquery": "INSTR(haystack, needle)",
+                "databricks": "INSTR(haystack, needle)",
+                "doris": "INSTR(haystack, needle)",
+                "duckdb": "INSTR(haystack, needle)",
+                "hive": "INSTR(haystack, needle)",
+                "mysql": "INSTR(haystack, needle)",
+                "oracle": "INSTR(haystack, needle)",
+                "spark": "INSTR(haystack, needle)",
+                "spark2": "INSTR(haystack, needle)",
+                "sqlite": "INSTR(haystack, needle)",
+                "starrocks": "INSTR(haystack, needle)",
+                "teradata": "INSTR(haystack, needle)",
+            },
+        )
+        self.validate_all(
+            "STR_POSITION(haystack, needle)",
+            read={
+                "clickhouse": "LOCATE(needle, haystack)",
+                "databricks": "LOCATE(needle, haystack)",
+                "doris": "LOCATE(needle, haystack)",
+                "hive": "LOCATE(needle, haystack)",
+                "mysql": "LOCATE(needle, haystack)",
+                "spark": "LOCATE(needle, haystack)",
+                "spark2": "LOCATE(needle, haystack)",
+                "starrocks": "LOCATE(needle, haystack)",
+                "teradata": "LOCATE(needle, haystack)",
+            },
+        )
+        self.validate_all(
+            "STR_POSITION(haystack, needle)",
+            read={
+                "athena": "CHARINDEX(needle, haystack)",
+                "databricks": "CHARINDEX(needle, haystack)",
+                "snowflake": "CHARINDEX(needle, haystack)",
+                "tsql": "CHARINDEX(needle, haystack)",
+            },
+        )
+        self.validate_all(
+            "STR_POSITION(haystack, needle)",
+            read={
+                "tableau": "FIND(haystack, needle)",
+            },
             write={
-                "drill": "STRPOS(SUBSTR(haystack, pos), needle) + pos - 1",
-                "presto": "STRPOS(SUBSTR(haystack, pos), needle) + pos - 1",
-                "spark": "LOCATE(needle, haystack, pos)",
-                "clickhouse": "position(haystack, needle, pos)",
-                "snowflake": "POSITION(needle, haystack, pos)",
-                "mysql": "LOCATE(needle, haystack, pos)",
+                "athena": "STRPOS(haystack, needle)",
+                "bigquery": "INSTR(haystack, needle)",
+                "clickhouse": "POSITION(haystack, needle)",
+                "databricks": "LOCATE(needle, haystack)",
+                "doris": "LOCATE(needle, haystack)",
+                "drill": "STRPOS(haystack, needle)",
+                "duckdb": "STRPOS(haystack, needle)",
+                "hive": "LOCATE(needle, haystack)",
+                "materialize": "POSITION(needle IN haystack)",
+                "mysql": "LOCATE(needle, haystack)",
+                "oracle": "INSTR(haystack, needle)",
+                "postgres": "POSITION(needle IN haystack)",
+                "presto": "STRPOS(haystack, needle)",
+                "redshift": "POSITION(needle IN haystack)",
+                "risingwave": "POSITION(needle IN haystack)",
+                "snowflake": "CHARINDEX(needle, haystack)",
+                "spark": "LOCATE(needle, haystack)",
+                "spark2": "LOCATE(needle, haystack)",
+                "sqlite": "INSTR(haystack, needle)",
+                "tableau": "FIND(haystack, needle)",
+                "teradata": "INSTR(haystack, needle)",
+                "trino": "STRPOS(haystack, needle)",
+                "tsql": "CHARINDEX(needle, haystack)",
+            },
+        )
+        self.validate_all(
+            "STR_POSITION(haystack, needle, position)",
+            read={
+                "clickhouse": "POSITION(haystack, needle, position)",
+                "databricks": "POSITION(needle, haystack, position)",
+                "snowflake": "POSITION(needle, haystack, position)",
+                "spark": "POSITION(needle, haystack, position)",
+                "spark2": "POSITION(needle, haystack, position)",
+            },
+        )
+        self.validate_all(
+            "STR_POSITION(haystack, needle, position)",
+            read={
+                "doris": "LOCATE(needle, haystack, position)",
+                "hive": "LOCATE(needle, haystack, position)",
+                "mysql": "LOCATE(needle, haystack, position)",
+                "spark": "LOCATE(needle, haystack, position)",
+                "spark2": "LOCATE(needle, haystack, position)",
+                "starrocks": "LOCATE(needle, haystack, position)",
+                "teradata": "LOCATE(needle, haystack, position)",
+                "clickhouse": "LOCATE(needle, haystack, position)",
+                "databricks": "LOCATE(needle, haystack, position)",
+            },
+        )
+        self.validate_all(
+            "STR_POSITION(haystack, needle, position)",
+            read={
+                "bigquery": "INSTR(haystack, needle, position)",
+                "doris": "INSTR(haystack, needle, position)",
+                "oracle": "INSTR(haystack, needle, position)",
+                "teradata": "INSTR(haystack, needle, position)",
+            },
+        )
+        self.validate_all(
+            "STR_POSITION(haystack, needle, position)",
+            read={
+                "databricks": "CHARINDEX(needle, haystack, position)",
+                "snowflake": "CHARINDEX(needle, haystack, position)",
+                "tsql": "CHARINDEX(needle, haystack, position)",
+            },
+        )
+        self.validate_all(
+            "STR_POSITION(haystack, needle, position)",
+            write={
+                "athena": "IF(STRPOS(SUBSTRING(haystack, position), needle) = 0, 0, STRPOS(SUBSTRING(haystack, position), needle) + position - 1)",
+                "bigquery": "INSTR(haystack, needle, position)",
+                "clickhouse": "POSITION(haystack, needle, position)",
+                "databricks": "LOCATE(needle, haystack, position)",
+                "doris": "LOCATE(needle, haystack, position)",
+                "drill": "`IF`(STRPOS(SUBSTRING(haystack, position), needle) = 0, 0, STRPOS(SUBSTRING(haystack, position), needle) + position - 1)",
+                "duckdb": "CASE WHEN STRPOS(SUBSTRING(haystack, position), needle) = 0 THEN 0 ELSE STRPOS(SUBSTRING(haystack, position), needle) + position - 1 END",
+                "hive": "LOCATE(needle, haystack, position)",
+                "materialize": "CASE WHEN POSITION(needle IN SUBSTRING(haystack FROM position)) = 0 THEN 0 ELSE POSITION(needle IN SUBSTRING(haystack FROM position)) + position - 1 END",
+                "mysql": "LOCATE(needle, haystack, position)",
+                "oracle": "INSTR(haystack, needle, position)",
+                "postgres": "CASE WHEN POSITION(needle IN SUBSTRING(haystack FROM position)) = 0 THEN 0 ELSE POSITION(needle IN SUBSTRING(haystack FROM position)) + position - 1 END",
+                "presto": "IF(STRPOS(SUBSTRING(haystack, position), needle) = 0, 0, STRPOS(SUBSTRING(haystack, position), needle) + position - 1)",
+                "redshift": "CASE WHEN POSITION(needle IN SUBSTRING(haystack FROM position)) = 0 THEN 0 ELSE POSITION(needle IN SUBSTRING(haystack FROM position)) + position - 1 END",
+                "risingwave": "CASE WHEN POSITION(needle IN SUBSTRING(haystack FROM position)) = 0 THEN 0 ELSE POSITION(needle IN SUBSTRING(haystack FROM position)) + position - 1 END",
+                "snowflake": "CHARINDEX(needle, haystack, position)",
+                "spark": "LOCATE(needle, haystack, position)",
+                "spark2": "LOCATE(needle, haystack, position)",
+                "sqlite": "IIF(INSTR(SUBSTRING(haystack, position), needle) = 0, 0, INSTR(SUBSTRING(haystack, position), needle) + position - 1)",
+                "tableau": "IF FIND(SUBSTRING(haystack, position), needle) = 0 THEN 0 ELSE FIND(SUBSTRING(haystack, position), needle) + position - 1 END",
+                "teradata": "INSTR(haystack, needle, position)",
+                "trino": "IF(STRPOS(SUBSTRING(haystack, position), needle) = 0, 0, STRPOS(SUBSTRING(haystack, position), needle) + position - 1)",
+                "tsql": "CHARINDEX(needle, haystack, position)",
+            },
+        )
+        self.validate_all(
+            "STR_POSITION(haystack, needle, position, occurrence)",
+            read={
+                "bigquery": "INSTR(haystack, needle, position, occurrence)",
+                "oracle": "INSTR(haystack, needle, position, occurrence)",
+                "teradata": "INSTR(haystack, needle, position, occurrence)",
+            },
+            write={
+                "bigquery": "INSTR(haystack, needle, position, occurrence)",
+                "oracle": "INSTR(haystack, needle, position, occurrence)",
+                "presto": "IF(STRPOS(SUBSTRING(haystack, position), needle, occurrence) = 0, 0, STRPOS(SUBSTRING(haystack, position), needle, occurrence) + position - 1)",
+                "tableau": "IF FINDNTH(SUBSTRING(haystack, position), needle, occurrence) = 0 THEN 0 ELSE FINDNTH(SUBSTRING(haystack, position), needle, occurrence) + position - 1 END",
+                "teradata": "INSTR(haystack, needle, position, occurrence)",
+                "trino": "IF(STRPOS(SUBSTRING(haystack, position), needle, occurrence) = 0, 0, STRPOS(SUBSTRING(haystack, position), needle, occurrence) + position - 1)",
             },
         )
         self.validate_all(
@@ -1761,15 +2007,67 @@ class TestDialect(Validator):
         )
         self.validate_all(
             "LEVENSHTEIN(col1, col2)",
-            write={
+            read={
                 "bigquery": "EDIT_DISTANCE(col1, col2)",
-                "duckdb": "LEVENSHTEIN(col1, col2)",
+                "clickhouse": "editDistance(col1, col2)",
                 "drill": "LEVENSHTEIN_DISTANCE(col1, col2)",
-                "presto": "LEVENSHTEIN_DISTANCE(col1, col2)",
+                "duckdb": "LEVENSHTEIN(col1, col2)",
                 "hive": "LEVENSHTEIN(col1, col2)",
                 "spark": "LEVENSHTEIN(col1, col2)",
+                "postgres": "LEVENSHTEIN(col1, col2)",
+                "presto": "LEVENSHTEIN_DISTANCE(col1, col2)",
+                "snowflake": "EDITDISTANCE(col1, col2)",
+                "sqlite": "EDITDIST3(col1, col2)",
+                "trino": "LEVENSHTEIN_DISTANCE(col1, col2)",
+            },
+            write={
+                "bigquery": "EDIT_DISTANCE(col1, col2)",
+                "clickhouse": "editDistance(col1, col2)",
+                "drill": "LEVENSHTEIN_DISTANCE(col1, col2)",
+                "duckdb": "LEVENSHTEIN(col1, col2)",
+                "hive": "LEVENSHTEIN(col1, col2)",
+                "spark": "LEVENSHTEIN(col1, col2)",
+                "postgres": "LEVENSHTEIN(col1, col2)",
+                "presto": "LEVENSHTEIN_DISTANCE(col1, col2)",
+                "snowflake": "EDITDISTANCE(col1, col2)",
+                "sqlite": "EDITDIST3(col1, col2)",
+                "trino": "LEVENSHTEIN_DISTANCE(col1, col2)",
             },
         )
+
+        self.validate_all(
+            "LEVENSHTEIN(col1, col2, 1, 2, 3)",
+            write={
+                "bigquery": UnsupportedError,
+                "clickhouse": UnsupportedError,
+                "drill": UnsupportedError,
+                "duckdb": UnsupportedError,
+                "hive": UnsupportedError,
+                "spark": UnsupportedError,
+                "postgres": "LEVENSHTEIN(col1, col2, 1, 2, 3)",
+                "presto": UnsupportedError,
+                "snowflake": UnsupportedError,
+                "sqlite": UnsupportedError,
+                "trino": UnsupportedError,
+            },
+        )
+        self.validate_all(
+            "LEVENSHTEIN(col1, col2, 1, 2, 3, 4)",
+            write={
+                "bigquery": UnsupportedError,
+                "clickhouse": UnsupportedError,
+                "drill": UnsupportedError,
+                "duckdb": UnsupportedError,
+                "hive": UnsupportedError,
+                "spark": UnsupportedError,
+                "postgres": "LEVENSHTEIN_LESS_EQUAL(col1, col2, 1, 2, 3, 4)",
+                "presto": UnsupportedError,
+                "snowflake": UnsupportedError,
+                "sqlite": UnsupportedError,
+                "trino": UnsupportedError,
+            },
+        )
+
         self.validate_all(
             "LEVENSHTEIN(coalesce(col1, col2), coalesce(col2, col1))",
             write={
@@ -2219,6 +2517,17 @@ SELECT
             },
         )
 
+        # needs to preserve the target alias in then WHEN condition and function but not in the THEN clause
+        self.validate_all(
+            """MERGE INTO foo AS target USING (SELECT a, b FROM tbl) AS src ON src.a = target.a
+            WHEN MATCHED THEN UPDATE SET target.b = COALESCE(src.b, target.b)
+            WHEN NOT MATCHED THEN INSERT (target.a, target.b) VALUES (src.a, src.b)""",
+            write={
+                "trino": """MERGE INTO foo AS target USING (SELECT a, b FROM tbl) AS src ON src.a = target.a WHEN MATCHED THEN UPDATE SET b = COALESCE(src.b, target.b) WHEN NOT MATCHED THEN INSERT (a, b) VALUES (src.a, src.b)""",
+                "postgres": """MERGE INTO foo AS target USING (SELECT a, b FROM tbl) AS src ON src.a = target.a WHEN MATCHED THEN UPDATE SET b = COALESCE(src.b, target.b) WHEN NOT MATCHED THEN INSERT (a, b) VALUES (src.a, src.b)""",
+            },
+        )
+
     def test_substring(self):
         self.validate_all(
             "SUBSTR('123456', 2, 3)",
@@ -2336,6 +2645,8 @@ SELECT
                 "snowflake": "SELECT COUNT_IF(col % 2 = 0) FROM foo",
                 "sqlite": "SELECT SUM(IIF(col % 2 = 0, 1, 0)) FROM foo",
                 "tsql": "SELECT COUNT_IF(col % 2 = 0) FROM foo",
+                "postgres": "SELECT SUM(CASE WHEN col % 2 = 0 THEN 1 ELSE 0 END) FROM foo",
+                "redshift": "SELECT SUM(CASE WHEN col % 2 = 0 THEN 1 ELSE 0 END) FROM foo",
             },
         )
         self.validate_all(
@@ -2716,7 +3027,7 @@ FROM subquery2""",
                 "databricks": "SELECT * FROM EXPLODE(SEQUENCE(CAST('2020-01-01' AS DATE), CAST('2020-02-01' AS DATE), INTERVAL '1' WEEK))",
                 "duckdb": "SELECT * FROM UNNEST(CAST(GENERATE_SERIES(CAST('2020-01-01' AS DATE), CAST('2020-02-01' AS DATE), (7 * INTERVAL '1' DAY)) AS DATE[]))",
                 "mysql": "WITH RECURSIVE _generated_dates(date_value) AS (SELECT CAST('2020-01-01' AS DATE) AS date_value UNION ALL SELECT CAST(DATE_ADD(date_value, INTERVAL 1 WEEK) AS DATE) FROM _generated_dates WHERE CAST(DATE_ADD(date_value, INTERVAL 1 WEEK) AS DATE) <= CAST('2020-02-01' AS DATE)) SELECT * FROM (SELECT date_value FROM _generated_dates) AS _generated_dates",
-                "postgres": "SELECT * FROM (SELECT CAST(value AS DATE) FROM GENERATE_SERIES(CAST('2020-01-01' AS DATE), CAST('2020-02-01' AS DATE), INTERVAL '1 WEEK') AS value) AS _unnested_generate_series",
+                "postgres": "SELECT * FROM (SELECT CAST(value AS DATE) FROM GENERATE_SERIES(CAST('2020-01-01' AS DATE), CAST('2020-02-01' AS DATE), INTERVAL '1 WEEK') AS _t(value)) AS _unnested_generate_series",
                 "presto": "SELECT * FROM UNNEST(SEQUENCE(CAST('2020-01-01' AS DATE), CAST('2020-02-01' AS DATE), (1 * INTERVAL '7' DAY)))",
                 "redshift": "WITH RECURSIVE _generated_dates(date_value) AS (SELECT CAST('2020-01-01' AS DATE) AS date_value UNION ALL SELECT CAST(DATEADD(WEEK, 1, date_value) AS DATE) FROM _generated_dates WHERE CAST(DATEADD(WEEK, 1, date_value) AS DATE) <= CAST('2020-02-01' AS DATE)) SELECT * FROM (SELECT date_value FROM _generated_dates) AS _generated_dates",
                 "snowflake": "SELECT * FROM (SELECT DATEADD(WEEK, CAST(value AS INT), CAST('2020-01-01' AS DATE)) AS value FROM TABLE(FLATTEN(INPUT => ARRAY_GENERATE_RANGE(0, (DATEDIFF(WEEK, CAST('2020-01-01' AS DATE), CAST('2020-02-01' AS DATE)) + 1 - 1) + 1))) AS _u(seq, key, path, index, value, this))",
@@ -2748,6 +3059,13 @@ FROM subquery2""",
                 "redshift": "WITH RECURSIVE _generated_dates(date_week) AS (SELECT CAST('2020-01-01' AS DATE) AS date_week UNION ALL SELECT CAST(DATEADD(WEEK, 1, date_week) AS DATE) FROM _generated_dates WHERE CAST(DATEADD(WEEK, 1, date_week) AS DATE) <= CAST('2020-02-01' AS DATE)) SELECT * FROM (SELECT date_week FROM _generated_dates) AS _generated_dates",
                 "snowflake": "SELECT * FROM (SELECT DATEADD(WEEK, CAST(date_week AS INT), CAST('2020-01-01' AS DATE)) AS date_week FROM TABLE(FLATTEN(INPUT => ARRAY_GENERATE_RANGE(0, (DATEDIFF(WEEK, CAST('2020-01-01' AS DATE), CAST('2020-02-01' AS DATE)) + 1 - 1) + 1))) AS _q(seq, key, path, index, date_week, this)) AS _q(date_week)",
                 "tsql": "WITH _generated_dates(date_week) AS (SELECT CAST('2020-01-01' AS DATE) AS date_week UNION ALL SELECT CAST(DATEADD(WEEK, 1, date_week) AS DATE) FROM _generated_dates WHERE CAST(DATEADD(WEEK, 1, date_week) AS DATE) <= CAST('2020-02-01' AS DATE)) SELECT * FROM (SELECT date_week AS date_week FROM _generated_dates) AS _generated_dates",
+            },
+        )
+
+        self.validate_all(
+            "SELECT ARRAY_LENGTH(GENERATE_DATE_ARRAY(DATE '2020-01-01', DATE '2020-02-01', INTERVAL 1 WEEK))",
+            write={
+                "snowflake": "SELECT ARRAY_SIZE((SELECT ARRAY_AGG(*) FROM (SELECT DATEADD(WEEK, CAST(value AS INT), CAST('2020-01-01' AS DATE)) AS value FROM TABLE(FLATTEN(INPUT => ARRAY_GENERATE_RANGE(0, (DATEDIFF(WEEK, CAST('2020-01-01' AS DATE), CAST('2020-02-01' AS DATE)) + 1 - 1) + 1))) AS _u(seq, key, path, index, value, this))))",
             },
         )
 
@@ -2878,6 +3196,7 @@ FROM subquery2""",
                 "postgres": "GEN_RANDOM_UUID()",
                 "bigquery": "GENERATE_UUID()",
                 "snowflake": "UUID_STRING()",
+                "tsql": "NEWID()",
             },
             write={
                 "hive": "UUID()",
@@ -2891,5 +3210,163 @@ FROM subquery2""",
                 "postgres": "GEN_RANDOM_UUID()",
                 "bigquery": "GENERATE_UUID()",
                 "snowflake": "UUID_STRING()",
+                "tsql": "NEWID()",
             },
         )
+
+    def test_escaped_identifier_delimiter(self):
+        for dialect in ("databricks", "hive", "mysql", "spark2", "spark"):
+            with self.subTest(f"Testing escaped backtick in identifier name for {dialect}"):
+                self.validate_all(
+                    'SELECT 1 AS "x`"',
+                    read={
+                        dialect: "SELECT 1 AS `x```",
+                    },
+                    write={
+                        dialect: "SELECT 1 AS `x```",
+                    },
+                )
+
+        for dialect in (
+            "",
+            "clickhouse",
+            "duckdb",
+            "postgres",
+            "presto",
+            "trino",
+            "redshift",
+            "snowflake",
+            "sqlite",
+        ):
+            with self.subTest(f"Testing escaped double-quote in identifier name for {dialect}"):
+                self.validate_all(
+                    'SELECT 1 AS "x"""',
+                    read={
+                        dialect: 'SELECT 1 AS "x"""',
+                    },
+                    write={
+                        dialect: 'SELECT 1 AS "x"""',
+                    },
+                )
+
+        for dialect in ("clickhouse", "sqlite"):
+            with self.subTest(f"Testing escaped backtick in identifier name for {dialect}"):
+                self.validate_all(
+                    'SELECT 1 AS "x`"',
+                    read={
+                        dialect: "SELECT 1 AS `x```",
+                    },
+                    write={
+                        dialect: 'SELECT 1 AS "x`"',
+                    },
+                )
+
+        self.validate_all(
+            'SELECT 1 AS "x`"',
+            read={
+                "clickhouse": "SELECT 1 AS `x\\``",
+            },
+            write={
+                "clickhouse": 'SELECT 1 AS "x`"',
+            },
+        )
+        for name in ('"x\\""', '`x"`'):
+            with self.subTest(f"Testing ClickHouse delimiter escaping: {name}"):
+                self.validate_all(
+                    'SELECT 1 AS "x"""',
+                    read={
+                        "clickhouse": f"SELECT 1 AS {name}",
+                    },
+                    write={
+                        "clickhouse": 'SELECT 1 AS "x"""',
+                    },
+                )
+
+        for name in ("[[x]]]", '"[x]"'):
+            with self.subTest(f"Testing T-SQL delimiter escaping: {name}"):
+                self.validate_all(
+                    'SELECT 1 AS "[x]"',
+                    read={
+                        "tsql": f"SELECT 1 AS {name}",
+                    },
+                    write={
+                        "tsql": "SELECT 1 AS [[x]]]",
+                    },
+                )
+        for name in ('[x"]', '"x"""'):
+            with self.subTest(f"Testing T-SQL delimiter escaping: {name}"):
+                self.validate_all(
+                    'SELECT 1 AS "x"""',
+                    read={
+                        "tsql": f"SELECT 1 AS {name}",
+                    },
+                    write={
+                        "tsql": 'SELECT 1 AS [x"]',
+                    },
+                )
+
+    def test_median(self):
+        for suffix in (
+            "",
+            " OVER ()",
+        ):
+            self.validate_all(
+                f"MEDIAN(x){suffix}",
+                read={
+                    "snowflake": f"MEDIAN(x){suffix}",
+                    "duckdb": f"MEDIAN(x){suffix}",
+                    "spark": f"MEDIAN(x){suffix}",
+                    "databricks": f"MEDIAN(x){suffix}",
+                    "redshift": f"MEDIAN(x){suffix}",
+                    "oracle": f"MEDIAN(x){suffix}",
+                },
+                write={
+                    "snowflake": f"MEDIAN(x){suffix}",
+                    "duckdb": f"MEDIAN(x){suffix}",
+                    "spark": f"MEDIAN(x){suffix}",
+                    "databricks": f"MEDIAN(x){suffix}",
+                    "redshift": f"MEDIAN(x){suffix}",
+                    "oracle": f"MEDIAN(x){suffix}",
+                    "clickhouse": f"median(x){suffix}",
+                    "postgres": f"PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x){suffix}",
+                },
+            )
+
+    def test_current_schema(self):
+        self.validate_all(
+            "CURRENT_SCHEMA()",
+            read={
+                "mysql": "SCHEMA()",
+                "postgres": "CURRENT_SCHEMA()",
+                "tsql": "SCHEMA_NAME()",
+            },
+            write={
+                "sqlite": "'main'",
+                "mysql": "SCHEMA()",
+                "postgres": "CURRENT_SCHEMA",
+                "tsql": "SCHEMA_NAME()",
+            },
+        )
+
+    def test_integer_hex_strings(self):
+        # Hex strings such as 0xCC represent INTEGER values in the read dialects
+        integer_dialects = ("bigquery", "clickhouse")
+        for read_dialect in integer_dialects:
+            for write_dialect in (
+                "",
+                "duckdb",
+                "databricks",
+                "snowflake",
+                "spark",
+                "redshift",
+            ):
+                with self.subTest(f"Testing hex string -> INTEGER evaluation for {read_dialect}"):
+                    self.assertEqual(
+                        parse_one("SELECT 0xCC", read=read_dialect).sql(write_dialect), "SELECT 204"
+                    )
+
+            for other_integer_dialects in integer_dialects:
+                self.assertEqual(
+                    parse_one("SELECT 0xCC", read=read_dialect).sql(other_integer_dialects),
+                    "SELECT 0xCC",
+                )

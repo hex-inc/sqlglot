@@ -2,7 +2,7 @@ from setuptools import find_namespace_packages, setup
 
 
 def sqlglotrs_version():
-    with open("sqlglotrs/Cargo.toml") as fd:
+    with open("sqlglotrs/Cargo.toml", encoding="utf-8") as fd:
         for line in fd.readlines():
             if line.strip().startswith("version"):
                 return line.split("=")[1].strip().strip('"')
@@ -38,7 +38,7 @@ setup(
             "pytz",
             "pdoc",
             "pre-commit",
-            "ruff==0.4.3",
+            "ruff==0.7.2",
             "types-python-dateutil",
             "types-pytz",
             "typing_extensions",

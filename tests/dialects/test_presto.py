@@ -7,6 +7,12 @@ class TestPresto(Validator):
     dialect = "presto"
 
     def test_cast(self):
+        self.validate_identity("DEALLOCATE PREPARE my_query", check_command_warning=True)
+        self.validate_identity("DESCRIBE INPUT x", check_command_warning=True)
+        self.validate_identity("DESCRIBE OUTPUT x", check_command_warning=True)
+        self.validate_identity(
+            "RESET SESSION hive.optimized_reader_enabled", check_command_warning=True
+        )
         self.validate_identity("SELECT * FROM x qualify", "SELECT * FROM x AS qualify")
         self.validate_identity("CAST(x AS IPADDRESS)")
         self.validate_identity("CAST(x AS IPPREFIX)")
@@ -98,7 +104,7 @@ class TestPresto(Validator):
         self.validate_all(
             "CAST(ARRAY[1, 2] AS ARRAY(BIGINT))",
             write={
-                "bigquery": "CAST([1, 2] AS ARRAY<INT64>)",
+                "bigquery": "ARRAY<INT64>[1, 2]",
                 "duckdb": "CAST([1, 2] AS BIGINT[])",
                 "presto": "CAST(ARRAY[1, 2] AS ARRAY(BIGINT))",
                 "spark": "CAST(ARRAY(1, 2) AS ARRAY<BIGINT>)",
@@ -198,14 +204,14 @@ class TestPresto(Validator):
             },
         )
         self.validate_all(
-            "STRPOS('ABC', 'A', 3)",
-            read={
-                "trino": "STRPOS('ABC', 'A', 3)",
-            },
+            "STRPOS(haystack, needle, occurrence)",
             write={
-                "presto": "STRPOS('ABC', 'A', 3)",
-                "trino": "STRPOS('ABC', 'A', 3)",
-                "snowflake": "POSITION('A', 'ABC')",
+                "bigquery": "INSTR(haystack, needle, 1, occurrence)",
+                "oracle": "INSTR(haystack, needle, 1, occurrence)",
+                "presto": "STRPOS(haystack, needle, occurrence)",
+                "tableau": "FINDNTH(haystack, needle, occurrence)",
+                "trino": "STRPOS(haystack, needle, occurrence)",
+                "teradata": "INSTR(haystack, needle, 1, occurrence)",
             },
         )
 
@@ -348,7 +354,7 @@ class TestPresto(Validator):
             },
         )
         self.validate_all(
-            "((DAY_OF_WEEK(CAST(TRY_CAST('2012-08-08 01:00:00' AS TIMESTAMP) AS DATE)) % 7) + 1)",
+            "((DAY_OF_WEEK(CAST(CAST(TRY_CAST('2012-08-08 01:00:00' AS TIMESTAMP WITH TIME ZONE) AS TIMESTAMP) AS DATE)) % 7) + 1)",
             read={
                 "spark": "DAYOFWEEK(CAST('2012-08-08 01:00:00' AS TIMESTAMP))",
             },
@@ -400,7 +406,7 @@ class TestPresto(Validator):
             },
         )
         self.validate_all(
-            "SELECT AT_TIMEZONE(CAST('2012-10-31 00:00' AS TIMESTAMP), 'America/Sao_Paulo')",
+            "SELECT AT_TIMEZONE(CAST('2012-10-31 00:00' AS TIMESTAMP WITH TIME ZONE), 'America/Sao_Paulo')",
             read={
                 "spark": "SELECT FROM_UTC_TIMESTAMP(TIMESTAMP '2012-10-31 00:00', 'America/Sao_Paulo')",
             },
@@ -413,13 +419,6 @@ class TestPresto(Validator):
         self.validate_all(
             "CAST(x AS TIMESTAMP)",
             read={"mysql": "TIMESTAMP(x)"},
-        )
-        self.validate_all(
-            "TIMESTAMP(x, 'America/Los_Angeles')",
-            write={
-                "duckdb": "CAST(x AS TIMESTAMP) AT TIME ZONE 'America/Los_Angeles'",
-                "presto": "AT_TIMEZONE(CAST(x AS TIMESTAMP), 'America/Los_Angeles')",
-            },
         )
         # this case isn't really correct, but it's a fall back for mysql's version
         self.validate_all(
@@ -729,7 +728,7 @@ class TestPresto(Validator):
             "SELECT MIN_BY(a.id, a.timestamp, 3) FROM a",
             write={
                 "clickhouse": "SELECT argMin(a.id, a.timestamp) FROM a",
-                "duckdb": "SELECT ARG_MIN(a.id, a.timestamp) FROM a",
+                "duckdb": "SELECT ARG_MIN(a.id, a.timestamp, 3) FROM a",
                 "presto": "SELECT MIN_BY(a.id, a.timestamp, 3) FROM a",
                 "snowflake": "SELECT MIN_BY(a.id, a.timestamp, 3) FROM a",
                 "spark": "SELECT MIN_BY(a.id, a.timestamp) FROM a",
@@ -1072,6 +1071,21 @@ class TestPresto(Validator):
                 "databricks": "REGEXP_EXTRACT('abc', '(a)(b)(c)', 0)",
             },
         )
+        self.validate_all(
+            "CURRENT_USER",
+            read={
+                "presto": "CURRENT_USER",
+                "trino": "CURRENT_USER",
+                "snowflake": "CURRENT_USER()",  # Although the ANSI standard is CURRENT_USER
+            },
+            write={
+                "trino": "CURRENT_USER",
+                "snowflake": "CURRENT_USER()",
+            },
+        )
+        self.validate_identity(
+            "SELECT id, FIRST_VALUE(is_deleted) OVER (PARTITION BY id) AS first_is_deleted, NTH_VALUE(is_deleted, 2) OVER (PARTITION BY id) AS nth_is_deleted, LAST_VALUE(is_deleted) OVER (PARTITION BY id) AS last_is_deleted FROM my_table"
+        )
 
     def test_encode_decode(self):
         self.validate_identity("FROM_UTF8(x, y)")
@@ -1192,7 +1206,8 @@ MATCH_RECOGNIZE (
   DEFINE
     B AS totalprice < PREV(totalprice),
     C AS totalprice > PREV(totalprice) AND totalprice <= A.totalprice,
-    D AS totalprice > PREV(totalprice)
+    D AS totalprice > PREV(totalprice),
+    E AS MAX(foo) >= NEXT(bar)
 )""",
             pretty=True,
         )
@@ -1284,3 +1299,7 @@ MATCH_RECOGNIZE (
 
             # If the setting is overriden to False, then generate ROW access (dot notation)
             self.assertEqual(s.sql(dialect_row_access_setting), 'SELECT col.x.y."special string"')
+
+    def test_analyze(self):
+        self.validate_identity("ANALYZE tbl")
+        self.validate_identity("ANALYZE tbl WITH (prop1=val1, prop2=val2)")

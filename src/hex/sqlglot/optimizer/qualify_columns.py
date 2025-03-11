@@ -56,7 +56,21 @@ def qualify_columns(
     dialect = Dialect.get_or_raise(schema.dialect)
     pseudocolumns = dialect.PSEUDOCOLUMNS
 
+    snowflake_or_oracle = dialect in ("oracle", "snowflake")
+
     for scope in traverse_scope(expression):
+        scope_expression = scope.expression
+        is_select = isinstance(scope_expression, exp.Select)
+
+        if is_select and snowflake_or_oracle and scope_expression.args.get("connect"):
+            # In Snowflake / Oracle queries that have a CONNECT BY clause, one can use the LEVEL
+            # pseudocolumn, which doesn't belong to a table, so we change it into an identifier
+            scope_expression.transform(
+                lambda n: n.this if isinstance(n, exp.Column) and n.name == "LEVEL" else n,
+                copy=False,
+            )
+            scope.clear_cache()
+
         resolver = Resolver(scope, schema, infer_schema=infer_schema)
         _pop_table_column_aliases(scope.ctes)
         _pop_table_column_aliases(scope.derived_tables)
@@ -66,6 +80,7 @@ def qualify_columns(
             _expand_alias_refs(
                 scope,
                 resolver,
+                dialect,
                 expand_only_groupby=dialect.EXPAND_ALIAS_REFS_EARLY_ONLY_IN_GROUP_BY,
             )
 
@@ -73,9 +88,9 @@ def qualify_columns(
         _qualify_columns(scope, resolver, allow_partial_qualification=allow_partial_qualification)
 
         if not schema.empty and expand_alias_refs:
-            _expand_alias_refs(scope, resolver)
+            _expand_alias_refs(scope, resolver, dialect)
 
-        if not isinstance(scope.expression, exp.UDTF):
+        if is_select:
             if expand_stars:
                 _expand_stars(
                     scope,
@@ -87,7 +102,10 @@ def qualify_columns(
             qualify_outputs(scope)
 
         _expand_group_by(scope, dialect)
-        _expand_order_by(scope, resolver)
+
+        # DISTINCT ON and ORDER BY follow the same rules (tested in DuckDB, Postgres, ClickHouse)
+        # https://www.postgresql.org/docs/current/sql-select.html#SQL-DISTINCT
+        _expand_order_by_and_distinct_on(scope, resolver)
 
         if dialect == "bigquery":
             annotator.annotate_scope(scope)
@@ -158,6 +176,9 @@ def _expand_using(scope: Scope, resolver: Resolver) -> t.Dict[str, t.Any]:
     names = {join.alias_or_name for join in joins}
     ordered = [key for key in scope.selected_sources if key not in names]
 
+    if names and not ordered:
+        raise OptimizeError(f"Joins {names} missing source table {scope.expression}")
+
     # Mapping of automatically joined column names to an ordered set of source names (dict).
     column_tables: t.Dict[str, t.Dict[str, t.Any]] = {}
 
@@ -179,6 +200,7 @@ def _expand_using(scope: Scope, resolver: Resolver) -> t.Dict[str, t.Any]:
         join_columns = resolver.get_source_columns(join_table)
         conditions = []
         using_identifier_count = len(using)
+        is_semi_or_anti_join = join.is_semi_or_anti_join
 
         for identifier in using:
             identifier = identifier.name
@@ -207,10 +229,14 @@ def _expand_using(scope: Scope, resolver: Resolver) -> t.Dict[str, t.Any]:
 
             # Set all values in the dict to None, because we only care about the key ordering
             tables = column_tables.setdefault(identifier, {})
-            if table not in tables:
-                tables[table] = None
-            if join_table not in tables:
-                tables[join_table] = None
+
+            # Do not update the dict if this was a SEMI/ANTI join in
+            # order to avoid generating COALESCE columns for this join pair
+            if not is_semi_or_anti_join:
+                if table not in tables:
+                    tables[table] = None
+                if join_table not in tables:
+                    tables[join_table] = None
 
         join.args.pop("using")
         join.set("on", exp.and_(*conditions, copy=False))
@@ -220,18 +246,31 @@ def _expand_using(scope: Scope, resolver: Resolver) -> t.Dict[str, t.Any]:
             if not column.table and column.name in column_tables:
                 tables = column_tables[column.name]
                 coalesce_args = [exp.column(column.name, table=table) for table in tables]
-                replacement = exp.func("coalesce", *coalesce_args)
+                replacement: exp.Expression = exp.func("coalesce", *coalesce_args)
 
-                # Ensure selects keep their output name
                 if isinstance(column.parent, exp.Select):
+                    # Ensure the USING column keeps its name if it's projected
                     replacement = alias(replacement, alias=column.name, copy=False)
+                elif isinstance(column.parent, exp.Struct):
+                    # Ensure the USING column keeps its name if it's an anonymous STRUCT field
+                    replacement = exp.PropertyEQ(
+                        this=exp.to_identifier(column.name), expression=replacement
+                    )
 
                 scope.replace(column, replacement)
 
     return column_tables
 
 
-def _expand_alias_refs(scope: Scope, resolver: Resolver, expand_only_groupby: bool = False) -> None:
+def _expand_alias_refs(
+    scope: Scope, resolver: Resolver, dialect: Dialect, expand_only_groupby: bool = False
+) -> None:
+    """
+    Expand references to aliases.
+    Example:
+        SELECT y.foo AS bar, bar * 2 AS baz FROM y
+     => SELECT y.foo AS bar, y.foo * 2 AS baz FROM y
+    """
     expression = scope.expression
 
     if not isinstance(expression, exp.Select):
@@ -304,6 +343,12 @@ def _expand_alias_refs(scope: Scope, resolver: Resolver, expand_only_groupby: bo
     replace_columns(expression.args.get("having"), resolve_table=True)
     replace_columns(expression.args.get("qualify"), resolve_table=True)
 
+    # Snowflake allows alias expansion in the JOIN ... ON clause (and almost everywhere else)
+    # https://docs.snowflake.com/en/sql-reference/sql/select#usage-notes
+    if dialect == "snowflake":
+        for join in expression.args.get("joins") or []:
+            replace_columns(join)
+
     scope.clear_cache()
 
 
@@ -317,36 +362,41 @@ def _expand_group_by(scope: Scope, dialect: DialectType) -> None:
     expression.set("group", group)
 
 
-def _expand_order_by(scope: Scope, resolver: Resolver) -> None:
-    order = scope.expression.args.get("order")
-    if not order:
-        return
+def _expand_order_by_and_distinct_on(scope: Scope, resolver: Resolver) -> None:
+    for modifier_key in ("order", "distinct"):
+        modifier = scope.expression.args.get(modifier_key)
+        if isinstance(modifier, exp.Distinct):
+            modifier = modifier.args.get("on")
 
-    ordereds = order.expressions
-    for ordered, new_expression in zip(
-        ordereds,
-        _expand_positional_references(
-            scope, (o.this for o in ordereds), resolver.schema.dialect, alias=True
-        ),
-    ):
-        for agg in ordered.find_all(exp.AggFunc):
-            for col in agg.find_all(exp.Column):
-                if not col.table:
-                    col.set("table", resolver.get_table(col.name))
+        if not isinstance(modifier, exp.Expression):
+            continue
 
-        ordered.set("this", new_expression)
+        modifier_expressions = modifier.expressions
+        if modifier_key == "order":
+            modifier_expressions = [ordered.this for ordered in modifier_expressions]
 
-    if scope.expression.args.get("group"):
-        selects = {s.this: exp.column(s.alias_or_name) for s in scope.expression.selects}
+        for original, expanded in zip(
+            modifier_expressions,
+            _expand_positional_references(
+                scope, modifier_expressions, resolver.schema.dialect, alias=True
+            ),
+        ):
+            for agg in original.find_all(exp.AggFunc):
+                for col in agg.find_all(exp.Column):
+                    if not col.table:
+                        col.set("table", resolver.get_table(col.name))
 
-        for ordered in ordereds:
-            ordered = ordered.this
+            original.replace(expanded)
 
-            ordered.replace(
-                exp.to_identifier(_select_by_pos(scope, ordered).alias)
-                if ordered.is_int
-                else selects.get(ordered, ordered)
-            )
+        if scope.expression.args.get("group"):
+            selects = {s.this: exp.column(s.alias_or_name) for s in scope.expression.selects}
+
+            for expression in modifier_expressions:
+                expression.replace(
+                    exp.to_identifier(_select_by_pos(scope, expression).alias)
+                    if expression.is_int
+                    else selects.get(expression, expression)
+                )
 
 
 def _expand_positional_references(
@@ -524,7 +574,9 @@ def _expand_struct_stars(
         this = field.this.copy()
         root, *parts = [part.copy() for part in itertools.chain(dot_parts, [this])]
         new_column = exp.column(
-            t.cast(exp.Identifier, root), table=dot_column.args.get("table"), fields=parts
+            t.cast(exp.Identifier, root),
+            table=dot_column.args.get("table"),
+            fields=t.cast(t.List[exp.Identifier], parts),
         )
         new_selections.append(alias(new_column, this, copy=False))
 

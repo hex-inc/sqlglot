@@ -307,3 +307,18 @@ ARRAY<STRING>;
 # dialect: bigquery
 SPLIT(tbl.bin_col, delim);
 ARRAY<BINARY>;
+
+# dialect: bigquery
+STRING(json_expr);
+STRING;
+
+# dialect: bigquery
+STRING(timestamp_expr, timezone);
+STRING;
+
+--------------------------------------
+-- Snowflake
+--------------------------------------
+
+LEAST(x::DECIMAL(18, 2));
+DECIMAL(18, 2);

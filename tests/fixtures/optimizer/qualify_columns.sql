@@ -191,6 +191,10 @@ SELECT SOME_UDF(data).* FROM t;
 SELECT SOME_UDF(t.data).* FROM t AS t;
 
 # execute: false
+SELECT p.* FROM p UNION ALL SELECT p2.* FROM p2;
+SELECT p.* FROM p AS p UNION ALL SELECT p2.* FROM p2 AS p2;
+
+# execute: false
 # allow_partial_qualification: true
 # validate_qualify_columns: false
 SELECT a + 1 AS i, missing_column FROM x;
@@ -200,6 +204,74 @@ SELECT x.a + 1 AS i, missing_column AS missing_column FROM x AS x;
 # dialect: clickhouse
 SELECT s, arr1, arr2 FROM arrays_test LEFT ARRAY JOIN arr1, arrays_test.arr2;
 SELECT arrays_test.s AS s, arrays_test.arr1 AS arr1, arrays_test.arr2 AS arr2 FROM arrays_test AS arrays_test LEFT ARRAY JOIN arrays_test.arr1, arrays_test.arr2;
+
+# execute: false
+# dialect: snowflake
+WITH employees AS (
+    SELECT *
+    FROM (VALUES ('President', 1, NULL),
+                 ('Vice President Engineering', 10, 1),
+                 ('Programmer', 100, 10),
+                 ('QA Engineer', 101, 10),
+                 ('Vice President HR', 20, 1),
+                 ('Health Insurance Analyst', 200, 20)
+    ) AS t(title, employee_ID, manager_ID)
+)
+SELECT
+  employee_ID,
+  manager_ID,
+  title,
+  level
+FROM employees
+START WITH title = 'President'
+CONNECT BY manager_ID = PRIOR employee_id
+ORDER BY
+  employee_ID NULLS LAST;
+WITH EMPLOYEES AS (SELECT T.TITLE AS TITLE, T.EMPLOYEE_ID AS EMPLOYEE_ID, T.MANAGER_ID AS MANAGER_ID FROM (VALUES ('President', 1, NULL), ('Vice President Engineering', 10, 1), ('Programmer', 100, 10), ('QA Engineer', 101, 10), ('Vice President HR', 20, 1), ('Health Insurance Analyst', 200, 20)) AS T(TITLE, EMPLOYEE_ID, MANAGER_ID)) SELECT EMPLOYEES.EMPLOYEE_ID AS EMPLOYEE_ID, EMPLOYEES.MANAGER_ID AS MANAGER_ID, EMPLOYEES.TITLE AS TITLE, LEVEL AS LEVEL FROM EMPLOYEES AS EMPLOYEES START WITH EMPLOYEES.TITLE = 'President' CONNECT BY EMPLOYEES.MANAGER_ID = PRIOR EMPLOYEES.EMPLOYEE_ID ORDER BY EMPLOYEE_ID;
+
+# execute: false
+# dialect: oracle
+WITH
+t1 AS (
+  SELECT
+    1 AS c1,
+    1 AS c2,
+    'Y' AS TOP_PARENT_INDICATOR,
+    1 AS id
+  FROM DUAL
+),
+t2 AS (
+  SELECT
+    1 AS c2,
+    2 AS id
+  FROM DUAL
+)
+SELECT t1.c1
+FROM t1
+LEFT JOIN t2 ON t1.c2 = t2.c2
+WHERE (t1.TOP_PARENT_INDICATOR = 'Y' OR LEVEL = 1)
+START WITH (t1.id IS NOT NULL)
+CONNECT BY PRIOR t1.id = t2.id;
+WITH T1 AS (SELECT 1 AS C1, 1 AS C2, 'Y' AS TOP_PARENT_INDICATOR, 1 AS ID FROM DUAL DUAL), T2 AS (SELECT 1 AS C2, 2 AS ID FROM DUAL DUAL) SELECT T1.C1 AS C1 FROM T1 T1 LEFT JOIN T2 T2 ON T1.C2 = T2.C2 WHERE (T1.TOP_PARENT_INDICATOR = 'Y' OR LEVEL = 1) START WITH (NOT T1.ID IS NULL) CONNECT BY PRIOR T1.ID = T2.ID;
+
+# execute: false
+# dialect: postgres
+SELECT * FROM ROWS FROM (GENERATE_SERIES(1, 3), GENERATE_SERIES(10, 12)) AS t(a, b);
+SELECT t.a AS a, t.b AS b FROM ROWS FROM (GENERATE_SERIES(1, 3), GENERATE_SERIES(10, 12)) AS t(a, b);
+
+# execute: false
+# dialect: clickhouse
+SELECT generate_series FROM generate_series(0, 10) AS g;
+SELECT g.generate_series AS generate_series FROM generate_series(0, 10) AS g(generate_series);
+
+# execute: false
+# dialect: snowflake
+SELECT * FROM quarterly_sales PIVOT(SUM(amount) FOR quarter IN (ANY ORDER BY quarter)) ORDER BY empid;
+SELECT * FROM QUARTERLY_SALES AS QUARTERLY_SALES PIVOT(SUM(QUARTERLY_SALES.AMOUNT) FOR QUARTERLY_SALES.QUARTER IN (ANY ORDER BY QUARTER)) AS _Q_0 ORDER BY _Q_0.EMPID;
+
+# execute: false
+SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x) AS x FROM t;
+SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY t.x) AS x FROM t AS t;
 
 --------------------------------------
 -- Derived tables
@@ -248,6 +320,10 @@ SELECT x.a AS a FROM x AS x UNION SELECT x.a AS a FROM x AS x UNION SELECT x.a A
 
 SELECT a FROM (SELECT a FROM x UNION SELECT a FROM x) ORDER BY a;
 SELECT _q_0.a AS a FROM (SELECT x.a AS a FROM x AS x UNION SELECT x.a AS a FROM x AS x) AS _q_0 ORDER BY a;
+
+# title: nested subqueries in union
+((select a from x where a < 1)) UNION ((select a from x where a > 2));
+((SELECT x.a AS a FROM x AS x WHERE x.a < 1)) UNION ((SELECT x.a AS a FROM x AS x WHERE x.a > 2));
 
 --------------------------------------
 -- Subqueries
@@ -532,6 +608,14 @@ WITH t1 AS (SELECT 'x' AS id, CAST('2024-01-01' AS DATE) AS foo, 000 AS value), 
 WITH t1 AS (SELECT 'x' AS id, CAST('2024-01-01' AS DATE) AS foo, 000 AS value), t2 AS (SELECT 'x' AS id, CAST('2024-02-02' AS DATE) AS foo, 123 AS value), t3 AS (SELECT 'x' AS id, CAST('2024-02-02' AS DATE) AS foo, 456 AS value), t4 AS (SELECT 'x' AS id, CAST('2024-03-03' AS DATE) AS foo, 789 AS value) SELECT * FROM t1 FULL OUTER JOIN t2 USING (id, foo) FULL OUTER JOIN t3 USING (id, foo) FULL OUTER JOIN t4 USING (id, foo);
 WITH t1 AS (SELECT 'x' AS id, CAST('2024-01-01' AS DATE) AS foo, 000 AS value), t2 AS (SELECT 'x' AS id, CAST('2024-02-02' AS DATE) AS foo, 123 AS value), t3 AS (SELECT 'x' AS id, CAST('2024-02-02' AS DATE) AS foo, 456 AS value), t4 AS (SELECT 'x' AS id, CAST('2024-03-03' AS DATE) AS foo, 789 AS value) SELECT COALESCE(t1.id, t2.id, t3.id, t4.id) AS id, COALESCE(t1.foo, t2.foo, t3.foo, t4.foo) AS foo, t1.value AS value, t2.value AS value, t3.value AS value, t4.value AS value FROM t1 AS t1 FULL OUTER JOIN t2 AS t2 ON t1.id = t2.id AND t1.foo = t2.foo FULL OUTER JOIN t3 AS t3 ON COALESCE(t1.id, t2.id) = t3.id AND COALESCE(t1.foo, t2.foo) = t3.foo FULL OUTER JOIN t4 AS t4 ON COALESCE(t1.id, t2.id, t3.id) = t4.id AND COALESCE(t1.foo, t2.foo, t3.foo) = t4.foo;
 
+# title: Name anonymous STRUCT fields if replacing USING columns
+WITH t1 AS (SELECT 1 AS id), t2 AS (SELECT 2 AS id) SELECT STRUCT(id) AS my_field FROM t1 JOIN t2 USING (id);
+WITH t1 AS (SELECT 1 AS id), t2 AS (SELECT 2 AS id) SELECT STRUCT(COALESCE(t1.id, t2.id) AS id) AS my_field FROM t1 AS t1 JOIN t2 AS t2 ON t1.id = t2.id;
+
+# title: Do not rename aliased STRUCT fields if replacing USING columns
+WITH t1 AS (SELECT 1 AS id), t2 AS (SELECT 2 AS id) SELECT STRUCT(id AS col) AS my_field FROM t1 JOIN t2 USING (id);
+WITH t1 AS (SELECT 1 AS id), t2 AS (SELECT 2 AS id) SELECT STRUCT(COALESCE(t1.id, t2.id) AS col) AS my_field FROM t1 AS t1 JOIN t2 AS t2 ON t1.id = t2.id;
+
 --------------------------------------
 -- Hint with table reference
 --------------------------------------
@@ -682,6 +766,10 @@ WITH RECURSIVE t(c) AS (SELECT 1 AS c UNION ALL SELECT t.c + 1 AS c FROM t AS t 
 WITH RECURSIVE t AS (SELECT 1 AS c UNION ALL SELECT c + 1 AS c FROM t WHERE c <= 10) SELECT c FROM t;
 WITH RECURSIVE t AS (SELECT 1 AS c UNION ALL SELECT t.c + 1 AS c FROM t AS t WHERE t.c <= 10) SELECT t.c AS c FROM t AS t;
 
+# title: expand DISTINCT ON ordinals / projection names
+SELECT DISTINCT ON (new_col, b + 1, 1) t1.a AS new_col FROM x AS t1 ORDER BY new_col;
+SELECT DISTINCT ON (new_col, t1.b + 1, new_col) t1.a AS new_col FROM x AS t1 ORDER BY new_col;
+
 --------------------------------------
 -- Wrapped tables / join constructs
 --------------------------------------
@@ -719,3 +807,51 @@ SELECT y.b AS b FROM ((SELECT x.a AS a FROM x AS x) AS _q_0 INNER JOIN y AS y ON
 
 SELECT a, c FROM x TABLESAMPLE SYSTEM (10 ROWS) CROSS JOIN y TABLESAMPLE SYSTEM (10 ROWS);
 SELECT x.a AS a, y.c AS c FROM x AS x TABLESAMPLE SYSTEM (10 ROWS) CROSS JOIN y AS y TABLESAMPLE SYSTEM (10 ROWS);
+
+--------------------------------------
+-- Snowflake allows column alias to be used in almost all clauses
+--------------------------------------
+# title: Snowflake column alias in JOIN
+# dialect: snowflake
+# execute: false
+SELECT x.a AS foo FROM x JOIN y ON foo = y.b;
+SELECT X.A AS FOO FROM X AS X JOIN Y AS Y ON X.A = Y.B;
+
+# title: Snowflake column alias in QUALIFY
+# dialect: snowflake
+# execute: false
+SELECT x.a AS foo FROM x QUALIFY foo = 1;
+SELECT X.A AS FOO FROM X AS X QUALIFY X.A = 1;
+
+# title: Snowflake column alias in GROUP BY
+# dialect: snowflake
+# execute: false
+SELECT x.a AS foo FROM x GROUP BY foo = 1;
+SELECT X.A AS FOO FROM X AS X GROUP BY X.A = 1;
+
+# title: Snowflake column alias in WHERE
+# dialect: snowflake
+# execute: false
+SELECT x.a AS foo FROM x WHERE foo = 1;
+SELECT X.A AS FOO FROM X AS X WHERE X.A = 1;
+
+
+--------------------------------------
+-- SEMI / ANTI Joins
+--------------------------------------
+
+# title: SEMI JOIN table is excluded from the scope
+SELECT * FROM x SEMI JOIN y USING (b);
+SELECT x.a AS a, x.b AS b FROM x AS x SEMI JOIN y AS y ON x.b = y.b;
+
+# title: ANTI JOIN table is excluded from the scope
+SELECT * FROM x ANTI JOIN y USING (b);
+SELECT x.a AS a, x.b AS b FROM x AS x ANTI JOIN y AS y ON x.b = y.b;
+
+# title: SEMI + normal joins reinclude the table on scope
+SELECT * FROM x SEMI JOIN y USING (b) JOIN y USING (b);
+SELECT x.a AS a, COALESCE(x.b, y_2.b) AS b, y_2.c AS c FROM x AS x SEMI JOIN y AS y ON x.b = y.b JOIN y AS y_2 ON x.b = y_2.b;
+
+# title: ANTI + normal joins reinclude the table on scope
+SELECT * FROM x ANTI JOIN y USING (b) JOIN y USING (b);
+SELECT x.a AS a, COALESCE(x.b, y_2.b) AS b, y_2.c AS c FROM x AS x ANTI JOIN y AS y ON x.b = y.b JOIN y AS y_2 ON x.b = y_2.b;

@@ -179,27 +179,42 @@ def eliminate_distinct_on(expression: exp.Expression) -> exp.Expression:
     if (
         isinstance(expression, exp.Select)
         and expression.args.get("distinct")
-        and expression.args["distinct"].args.get("on")
-        and isinstance(expression.args["distinct"].args["on"], exp.Tuple)
+        and isinstance(expression.args["distinct"].args.get("on"), exp.Tuple)
     ):
-        distinct_cols = expression.args["distinct"].pop().args["on"].expressions
-        outer_selects = expression.selects
-        row_number = find_new_name(expression.named_selects, "_row_number")
-        window = exp.Window(this=exp.RowNumber(), partition_by=distinct_cols)
-        order = expression.args.get("order")
+        row_number_window_alias = find_new_name(expression.named_selects, "_row_number")
 
+        distinct_cols = expression.args["distinct"].pop().args["on"].expressions
+        window = exp.Window(this=exp.RowNumber(), partition_by=distinct_cols)
+
+        order = expression.args.get("order")
         if order:
             window.set("order", order.pop())
         else:
             window.set("order", exp.Order(expressions=[c.copy() for c in distinct_cols]))
 
-        window = exp.alias_(window, row_number)
+        window = exp.alias_(window, row_number_window_alias)
         expression.select(window, copy=False)
 
+        # We add aliases to the projections so that we can safely reference them in the outer query
+        new_selects = []
+        taken_names = {row_number_window_alias}
+        for select in expression.selects[:-1]:
+            if select.is_star:
+                new_selects = [exp.Star()]
+                break
+
+            if not isinstance(select, exp.Alias):
+                alias = find_new_name(taken_names, select.output_name or "_col")
+                quoted = select.this.args.get("quoted") if isinstance(select, exp.Column) else None
+                select = select.replace(exp.alias_(select, alias, quoted=quoted))
+
+            taken_names.add(select.output_name)
+            new_selects.append(select.args["alias"])
+
         return (
-            exp.select(*outer_selects, copy=False)
+            exp.select(*new_selects, copy=False)
             .from_(expression.subquery("_t", copy=False), copy=False)
-            .where(exp.column(row_number).eq(1), copy=False)
+            .where(exp.column(row_number_window_alias).eq(1), copy=False)
         )
 
     return expression
@@ -243,7 +258,7 @@ def eliminate_qualify(expression: exp.Expression) -> exp.Expression:
         }
 
         select_candidates = exp.Window if expression.is_star else (exp.Window, exp.Column)
-        for select_candidate in qualify_filters.find_all(select_candidates):
+        for select_candidate in list(qualify_filters.find_all(select_candidates)):
             if isinstance(select_candidate, exp.Window):
                 if expression_by_alias:
                     for column in select_candidate.find_all(exp.Column):
@@ -348,7 +363,8 @@ def unnest_to_explode(
                 )
             )
 
-        for join in expression.args.get("joins") or []:
+        joins = expression.args.get("joins") or []
+        for join in list(joins):
             join_expr = join.this
 
             is_lateral = isinstance(join_expr, exp.Lateral)
@@ -365,9 +381,19 @@ def unnest_to_explode(
                 has_multi_expr = len(exprs) > 1
                 exprs = _unnest_zip_exprs(unnest, exprs, has_multi_expr)
 
-                expression.args["joins"].remove(join)
+                joins.remove(join)
 
                 alias_cols = alias.columns if alias else []
+
+                # # Handle UNNEST to LATERAL VIEW EXPLODE: Exception is raised when there are 0 or > 2 aliases
+                # Spark LATERAL VIEW EXPLODE requires single alias for array/struct and two for Map type column unlike unnest in trino/presto which can take an arbitrary amount.
+                # Refs: https://spark.apache.org/docs/latest/sql-ref-syntax-qry-select-lateral-view.html
+
+                if not has_multi_expr and len(alias_cols) not in (1, 2):
+                    raise UnsupportedError(
+                        "CROSS JOIN UNNEST to LATERAL VIEW EXPLODE transformation requires explicit column aliases"
+                    )
+
                 for e, column in zip(exprs, alias_cols):
                     expression.append(
                         "laterals",
@@ -376,7 +402,7 @@ def unnest_to_explode(
                             view=True,
                             alias=exp.TableAlias(
                                 this=alias.this,  # type: ignore
-                                columns=alias_cols if unnest_using_arrays_zip else [column],  # type: ignore
+                                columns=alias_cols,
                             ),
                         ),
                     )
@@ -881,16 +907,15 @@ def eliminate_join_marks(expression: exp.Expression) -> exp.Expression:
                 len(marked_column_tables) == 1
             ), "Columns of only a single table can be marked with (+) in a given binary predicate"
 
+            # Add predicate if join already copied, or add join if it is new
             join_this = old_joins.get(col.table, query_from).this
-            new_join = exp.Join(this=join_this, on=join_predicate, kind="LEFT")
-
-            # Upsert new_join into new_joins dictionary
-            new_join_alias_or_name = new_join.alias_or_name
-            existing_join = new_joins.get(new_join_alias_or_name)
+            existing_join = new_joins.get(join_this.alias_or_name)
             if existing_join:
-                existing_join.set("on", exp.and_(existing_join.args.get("on"), new_join.args["on"]))
+                existing_join.set("on", exp.and_(existing_join.args["on"], join_predicate))
             else:
-                new_joins[new_join_alias_or_name] = new_join
+                new_joins[join_this.alias_or_name] = exp.Join(
+                    this=join_this.copy(), on=join_predicate.copy(), kind="LEFT"
+                )
 
             # If the parent of the target predicate is a binary node, then it now has only one child
             if isinstance(predicate_parent, exp.Binary):
@@ -908,9 +933,37 @@ def eliminate_join_marks(expression: exp.Expression) -> exp.Expression:
             new_from_name = list(only_old_joins)[0]
             query.set("from", exp.From(this=old_joins[new_from_name].this))
 
-        query.set("joins", list(new_joins.values()))
+        if new_joins:
+            query.set("joins", list(new_joins.values()))
 
         if not where.this:
             where.pop()
+
+    return expression
+
+
+def any_to_exists(expression: exp.Expression) -> exp.Expression:
+    """
+    Transform ANY operator to Spark's EXISTS
+
+    For example,
+        - Postgres: SELECT * FROM tbl WHERE 5 > ANY(tbl.col)
+        - Spark: SELECT * FROM tbl WHERE EXISTS(tbl.col, x -> x < 5)
+
+    Both ANY and EXISTS accept queries but currently only array expressions are supported for this
+    transformation
+    """
+    if isinstance(expression, exp.Select):
+        for any in expression.find_all(exp.Any):
+            this = any.this
+            if isinstance(this, exp.Query):
+                continue
+
+            binop = any.parent
+            if isinstance(binop, exp.Binary):
+                lambda_arg = exp.to_identifier("x")
+                any.replace(lambda_arg)
+                lambda_expr = exp.Lambda(this=binop.copy(), expressions=[lambda_arg])
+                binop.replace(exp.Exists(this=this.unnest(), expression=lambda_expr))
 
     return expression

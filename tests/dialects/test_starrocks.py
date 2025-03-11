@@ -18,6 +18,8 @@ class TestStarrocks(Validator):
             "DISTRIBUTED BY HASH (col1) PROPERTIES ('replication_num'='1')",
             "PRIMARY KEY (col1) DISTRIBUTED BY HASH (col1)",
             "DUPLICATE KEY (col1, col2) DISTRIBUTED BY HASH (col1)",
+            "UNIQUE KEY (col1, col2) PARTITION BY RANGE (col1) (START ('2024-01-01') END ('2024-01-31') EVERY (INTERVAL 1 DAY)) DISTRIBUTED BY HASH (col1)",
+            "UNIQUE KEY (col1, col2) PARTITION BY RANGE (col1, col2) (START ('1') END ('10') EVERY (1), START ('10') END ('100') EVERY (10)) DISTRIBUTED BY HASH (col1)",
         ]
 
         for properties in ddl_sqls:
@@ -31,6 +33,9 @@ class TestStarrocks(Validator):
         self.validate_identity(
             "CREATE TABLE foo (col0 DECIMAL(9, 1), col1 DECIMAL32(9, 1), col2 DECIMAL64(18, 10), col3 DECIMAL128(38, 10)) DISTRIBUTED BY HASH (col1) BUCKETS 1"
         )
+        self.validate_identity(
+            "CREATE TABLE foo (col1 LARGEINT) DISTRIBUTED BY HASH (col1) BUCKETS 1"
+        )
 
     def test_identity(self):
         self.validate_identity("SELECT CAST(`a`.`b` AS INT) FROM foo")
@@ -38,6 +43,9 @@ class TestStarrocks(Validator):
         self.validate_identity("SELECT [1, 2, 3]")
         self.validate_identity(
             """SELECT CAST(PARSE_JSON(fieldvalue) -> '00000000-0000-0000-0000-00000000' AS VARCHAR) AS `code` FROM (SELECT '{"00000000-0000-0000-0000-00000000":"code01"}') AS t(fieldvalue)"""
+        )
+        self.validate_identity(
+            "SELECT text FROM example_table", write_sql="SELECT `text` FROM example_table"
         )
 
     def test_time(self):
@@ -118,3 +126,24 @@ class TestStarrocks(Validator):
                         "spark": "SELECT id, t.col FROM tbl LATERAL VIEW EXPLODE(scores) t AS col",
                     },
                 )
+
+    def test_analyze(self):
+        self.validate_identity("ANALYZE TABLE TBL(c1, c2) PROPERTIES ('prop1'=val1)")
+        self.validate_identity("ANALYZE FULL TABLE TBL(c1, c2) PROPERTIES ('prop1'=val1)")
+        self.validate_identity("ANALYZE SAMPLE TABLE TBL(c1, c2) PROPERTIES ('prop1'=val1)")
+        self.validate_identity("ANALYZE TABLE TBL(c1, c2) WITH SYNC MODE PROPERTIES ('prop1'=val1)")
+        self.validate_identity(
+            "ANALYZE TABLE TBL(c1, c2) WITH ASYNC MODE PROPERTIES ('prop1'=val1)"
+        )
+        self.validate_identity(
+            "ANALYZE TABLE TBL UPDATE HISTOGRAM ON c1, c2 PROPERTIES ('prop1'=val1)"
+        )
+        self.validate_identity(
+            "ANALYZE TABLE TBL UPDATE HISTOGRAM ON c1, c2 WITH 5 BUCKETS PROPERTIES ('prop1'=val1)"
+        )
+        self.validate_identity(
+            "ANALYZE TABLE TBL UPDATE HISTOGRAM ON c1, c2 WITH SYNC MODE WITH 5 BUCKETS PROPERTIES ('prop1'=val1)"
+        )
+        self.validate_identity(
+            "ANALYZE TABLE TBL UPDATE HISTOGRAM ON c1, c2 WITH ASYNC MODE WITH 5 BUCKETS PROPERTIES ('prop1'=val1)"
+        )

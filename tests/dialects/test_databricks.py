@@ -7,6 +7,7 @@ class TestDatabricks(Validator):
     dialect = "databricks"
 
     def test_databricks(self):
+        self.validate_identity("SELECT * FROM stream")
         self.validate_identity("SELECT t.current_time FROM t")
         self.validate_identity("ALTER TABLE labels ADD COLUMN label_score FLOAT")
         self.validate_identity("DESCRIBE HISTORY a.b")
@@ -32,9 +33,6 @@ class TestDatabricks(Validator):
             "CREATE TABLE IF NOT EXISTS db.table (a TIMESTAMP, b BOOLEAN GENERATED ALWAYS AS (NOT a IS NULL)) USING DELTA"
         )
         self.validate_identity(
-            "SELECT DATE_FORMAT(CAST(FROM_UTC_TIMESTAMP(CAST(foo AS TIMESTAMP), 'America/Los_Angeles') AS TIMESTAMP), 'yyyy-MM-dd HH:mm:ss') AS foo FROM t"
-        )
-        self.validate_identity(
             "SELECT * FROM sales UNPIVOT INCLUDE NULLS (sales FOR quarter IN (q1 AS `Jan-Mar`))"
         )
         self.validate_identity(
@@ -53,12 +51,20 @@ class TestDatabricks(Validator):
             "COPY INTO target FROM `s3://link` FILEFORMAT = AVRO VALIDATE = ALL FILES = ('file1', 'file2') FORMAT_OPTIONS ('opt1'='true', 'opt2'='test') COPY_OPTIONS ('mergeSchema'='true')"
         )
         self.validate_identity(
+            "SELECT DATE_FORMAT(CAST(FROM_UTC_TIMESTAMP(foo, 'America/Los_Angeles') AS TIMESTAMP), 'yyyy-MM-dd HH:mm:ss') AS foo FROM t",
+            "SELECT DATE_FORMAT(CAST(FROM_UTC_TIMESTAMP(CAST(foo AS TIMESTAMP), 'America/Los_Angeles') AS TIMESTAMP), 'yyyy-MM-dd HH:mm:ss') AS foo FROM t",
+        )
+        self.validate_identity(
             "DATE_DIFF(day, created_at, current_date())",
             "DATEDIFF(DAY, created_at, CURRENT_DATE)",
         ).args["unit"].assert_is(exp.Var)
         self.validate_identity(
             r'SELECT r"\\foo.bar\"',
             r"SELECT '\\\\foo.bar\\'",
+        )
+        self.validate_identity(
+            "FROM_UTC_TIMESTAMP(x::TIMESTAMP, tz)",
+            "FROM_UTC_TIMESTAMP(CAST(x AS TIMESTAMP), tz)",
         )
 
         self.validate_all(
@@ -113,6 +119,17 @@ class TestDatabricks(Validator):
             write={
                 "databricks": "CREATE OR REPLACE FUNCTION func(a BIGINT, b BIGINT) RETURNS BIGINT RETURN a",
                 "duckdb": "CREATE OR REPLACE FUNCTION func(a, b) AS a",
+            },
+        )
+
+        self.validate_all(
+            "SELECT ANY(col) FROM VALUES (TRUE), (FALSE) AS tab(col)",
+            read={
+                "databricks": "SELECT ANY(col) FROM VALUES (TRUE), (FALSE) AS tab(col)",
+                "spark": "SELECT ANY(col) FROM VALUES (TRUE), (FALSE) AS tab(col)",
+            },
+            write={
+                "spark": "SELECT ANY(col) FROM VALUES (TRUE), (FALSE) AS tab(col)",
             },
         )
 
@@ -278,3 +295,15 @@ class TestDatabricks(Validator):
         self.validate_identity("GRANT SELECT ON TABLE sample_data TO `alf@melmak.et`")
         self.validate_identity("GRANT ALL PRIVILEGES ON TABLE forecasts TO finance")
         self.validate_identity("GRANT SELECT ON TABLE t TO `fab9e00e-ca35-11ec-9d64-0242ac120002`")
+
+    def test_analyze(self):
+        self.validate_identity("ANALYZE TABLE tbl COMPUTE DELTA STATISTICS NOSCAN")
+        self.validate_identity("ANALYZE TABLE tbl COMPUTE DELTA STATISTICS FOR ALL COLUMNS")
+        self.validate_identity("ANALYZE TABLE tbl COMPUTE DELTA STATISTICS FOR COLUMNS foo, bar")
+        self.validate_identity("ANALYZE TABLE ctlg.db.tbl COMPUTE DELTA STATISTICS NOSCAN")
+        self.validate_identity("ANALYZE TABLES COMPUTE STATISTICS NOSCAN")
+        self.validate_identity("ANALYZE TABLES FROM db COMPUTE STATISTICS")
+        self.validate_identity("ANALYZE TABLES IN db COMPUTE STATISTICS")
+        self.validate_identity(
+            "ANALYZE TABLE ctlg.db.tbl PARTITION(foo = 'foo', bar = 'bar') COMPUTE STATISTICS NOSCAN"
+        )

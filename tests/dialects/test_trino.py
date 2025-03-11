@@ -5,12 +5,43 @@ class TestTrino(Validator):
     dialect = "trino"
 
     def test_trino(self):
+        self.validate_identity("JSON_QUERY(m.properties, 'lax $.area' OMIT QUOTES NULL ON ERROR)")
         self.validate_identity("JSON_EXTRACT(content, json_path)")
         self.validate_identity("JSON_QUERY(content, 'lax $.HY.*')")
+        self.validate_identity("JSON_QUERY(content, 'strict $.HY.*' WITH WRAPPER)")
+        self.validate_identity("JSON_QUERY(content, 'strict $.HY.*' WITH ARRAY WRAPPER)")
         self.validate_identity("JSON_QUERY(content, 'strict $.HY.*' WITH UNCONDITIONAL WRAPPER)")
         self.validate_identity("JSON_QUERY(content, 'strict $.HY.*' WITHOUT CONDITIONAL WRAPPER)")
+        self.validate_identity("JSON_QUERY(description, 'strict $.comment' KEEP QUOTES)")
+        self.validate_identity(
+            "JSON_QUERY(description, 'strict $.comment' OMIT QUOTES ON SCALAR STRING)"
+        )
+        self.validate_identity(
+            "JSON_QUERY(content, 'strict $.HY.*' WITH UNCONDITIONAL WRAPPER KEEP QUOTES)"
+        )
+
+    def test_listagg(self):
         self.validate_identity(
             "SELECT LISTAGG(DISTINCT col, ',') WITHIN GROUP (ORDER BY col ASC) FROM tbl"
+        )
+        self.validate_identity(
+            "SELECT LISTAGG(col, '; ' ON OVERFLOW ERROR) WITHIN GROUP (ORDER BY col ASC) FROM tbl"
+        )
+        self.validate_identity(
+            "SELECT LISTAGG(col, '; ' ON OVERFLOW TRUNCATE WITH COUNT) WITHIN GROUP (ORDER BY col ASC) FROM tbl"
+        )
+        self.validate_identity(
+            "SELECT LISTAGG(col, '; ' ON OVERFLOW TRUNCATE WITHOUT COUNT) WITHIN GROUP (ORDER BY col ASC) FROM tbl"
+        )
+        self.validate_identity(
+            "SELECT LISTAGG(col, '; ' ON OVERFLOW TRUNCATE '...' WITH COUNT) WITHIN GROUP (ORDER BY col ASC) FROM tbl"
+        )
+        self.validate_identity(
+            "SELECT LISTAGG(col, '; ' ON OVERFLOW TRUNCATE '...' WITHOUT COUNT) WITHIN GROUP (ORDER BY col ASC) FROM tbl"
+        )
+        self.validate_identity(
+            "SELECT LISTAGG(col) WITHIN GROUP (ORDER BY col DESC) FROM tbl",
+            "SELECT LISTAGG(col, ',') WITHIN GROUP (ORDER BY col DESC) FROM tbl",
         )
 
     def test_trim(self):
@@ -57,3 +88,11 @@ class TestTrino(Validator):
         self.validate_identity(
             "ALTER VIEW people SET AUTHORIZATION alice", check_command_warning=True
         )
+        self.validate_identity("CREATE SCHEMA foo WITH (LOCATION='s3://bucket/foo')")
+        self.validate_identity(
+            "CREATE TABLE foo.bar WITH (LOCATION='s3://bucket/foo/bar') AS SELECT 1"
+        )
+
+    def test_analyze(self):
+        self.validate_identity("ANALYZE tbl")
+        self.validate_identity("ANALYZE tbl WITH (prop1=val1, prop2=val2)")

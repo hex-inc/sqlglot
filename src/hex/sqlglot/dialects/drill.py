@@ -8,11 +8,12 @@ from hex.sqlglot.dialects.dialect import (
     build_formatted_time,
     no_trycast_sql,
     rename_func,
-    str_position_sql,
+    strposition_sql,
     timestrtotime_sql,
 )
 from hex.sqlglot.dialects.mysql import date_add_sql
 from hex.sqlglot.transforms import preprocess, move_schema_columns_to_partitioned_by
+from hex.sqlglot.generator import unsupported_args
 
 
 def _str_to_date(self: Drill.Generator, expression: exp.StrToDate) -> str:
@@ -25,6 +26,7 @@ def _str_to_date(self: Drill.Generator, expression: exp.StrToDate) -> str:
 
 class Drill(Dialect):
     NORMALIZE_FUNCTIONS: bool | str = False
+    PRESERVE_ORIGINAL_NAMES = True
     NULL_ORDERING = "nulls_are_last"
     DATE_FORMAT = "'yyyy-MM-dd'"
     DATEINT_FORMAT = "'yyyyMMdd'"
@@ -78,8 +80,10 @@ class Drill(Dialect):
 
         FUNCTIONS = {
             **parser.Parser.FUNCTIONS,
+            "REPEATED_COUNT": exp.ArraySize.from_arg_list,
             "TO_TIMESTAMP": exp.TimeStrToTime.from_arg_list,
             "TO_CHAR": build_formatted_time(exp.TimeToStr, "drill"),
+            "LEVENSHTEIN_DISTANCE": exp.Levenshtein.from_arg_list,
         }
 
         LOG_DEFAULTS_TO_LN = True
@@ -91,6 +95,7 @@ class Drill(Dialect):
         NVL2_SUPPORTED = False
         LAST_DAY_SUPPORTS_DATE_PART = False
         SUPPORTS_CREATE_TABLE_LIKE = False
+        ARRAY_SIZE_NAME = "REPEATED_COUNT"
 
         TYPE_MAPPING = {
             **generator.Generator.TYPE_MAPPING,
@@ -115,7 +120,6 @@ class Drill(Dialect):
             **generator.Generator.TRANSFORMS,
             exp.CurrentTimestamp: lambda *_: "CURRENT_TIMESTAMP",
             exp.ArrayContains: rename_func("REPEATED_CONTAINS"),
-            exp.ArraySize: rename_func("REPEATED_COUNT"),
             exp.Create: preprocess([move_schema_columns_to_partitioned_by]),
             exp.DateAdd: date_add_sql("ADD"),
             exp.DateStrToDate: datestrtodate_sql,
@@ -127,15 +131,17 @@ class Drill(Dialect):
             exp.If: lambda self,
             e: f"`IF`({self.format_args(e.this, e.args.get('true'), e.args.get('false'))})",
             exp.ILike: lambda self, e: self.binary(e, "`ILIKE`"),
-            exp.Levenshtein: rename_func("LEVENSHTEIN_DISTANCE"),
+            exp.Levenshtein: unsupported_args("ins_cost", "del_cost", "sub_cost", "max_dist")(
+                rename_func("LEVENSHTEIN_DISTANCE")
+            ),
             exp.PartitionedByProperty: lambda self, e: f"PARTITION BY {self.sql(e, 'this')}",
             exp.RegexpLike: rename_func("REGEXP_MATCHES"),
-            exp.StrPosition: str_position_sql,
             exp.StrToDate: _str_to_date,
             exp.Pow: rename_func("POW"),
             exp.Select: transforms.preprocess(
                 [transforms.eliminate_distinct_on, transforms.eliminate_semi_and_anti_joins]
             ),
+            exp.StrPosition: strposition_sql,
             exp.StrToTime: lambda self, e: self.func("TO_TIMESTAMP", e.this, self.format_time(e)),
             exp.TimeStrToDate: lambda self, e: self.sql(exp.cast(e.this, exp.DataType.Type.DATE)),
             exp.TimeStrToTime: timestrtotime_sql,
