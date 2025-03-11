@@ -1,5 +1,5 @@
-from sqlglot import exp, generator
-from sqlglot.dialects.dialect import Dialect
+from hex.sqlglot import exp, generator
+from hex.sqlglot.dialects.dialect import Dialect
 
 
 class Druid(Dialect):
