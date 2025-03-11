@@ -160,7 +160,7 @@ TBLPROPERTIES (
             },
         )
 
-    @mock.patch("sqlglot.generator.logger")
+    @mock.patch("hex.sqlglot.generator.logger")
     def test_hint(self, logger):
         self.validate_all(
             "SELECT /*+ COALESCE(3) */ * FROM x",

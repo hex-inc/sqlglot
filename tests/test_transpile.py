@@ -926,16 +926,16 @@ FROM tbl1""",
             "SELECT\n  '1\n2'",
         )
 
-    @mock.patch("sqlglot.parser.logger")
+    @mock.patch("hex.sqlglot.parser.logger")
     def test_error_level(self, logger):
         invalid = "x + 1. ("
         expected_messages = [
-            "Required keyword: 'expressions' missing for <class 'sqlglot.expressions.Aliases'>. Line 1, Col: 8.\n  x + 1. \033[4m(\033[0m",
+            "Required keyword: 'expressions' missing for <class 'hex.sqlglot.expressions.Aliases'>. Line 1, Col: 8.\n  x + 1. \033[4m(\033[0m",
             "Expecting ). Line 1, Col: 8.\n  x + 1. \033[4m(\033[0m",
         ]
         expected_errors = [
             {
-                "description": "Required keyword: 'expressions' missing for <class 'sqlglot.expressions.Aliases'>",
+                "description": "Required keyword: 'expressions' missing for <class 'hex.sqlglot.expressions.Aliases'>",
                 "line": 1,
                 "col": 8,
                 "start_context": "x + 1. ",
@@ -972,14 +972,14 @@ FROM tbl1""",
 
         more_than_max_errors = "(((("
         expected_messages = (
-            "Required keyword: 'this' missing for <class 'sqlglot.expressions.Paren'>. Line 1, Col: 4.\n  (((\033[4m(\033[0m\n\n"
+            "Required keyword: 'this' missing for <class 'hex.sqlglot.expressions.Paren'>. Line 1, Col: 4.\n  (((\033[4m(\033[0m\n\n"
             "Expecting ). Line 1, Col: 4.\n  (((\033[4m(\033[0m\n\n"
             "Expecting ). Line 1, Col: 4.\n  (((\033[4m(\033[0m\n\n"
             "... and 2 more"
         )
         expected_errors = [
             {
-                "description": "Required keyword: 'this' missing for <class 'sqlglot.expressions.Paren'>",
+                "description": "Required keyword: 'this' missing for <class 'hex.sqlglot.expressions.Paren'>",
                 "line": 1,
                 "col": 4,
                 "start_context": "(((",
@@ -1006,7 +1006,7 @@ FROM tbl1""",
         self.assertEqual(str(ctx.exception), expected_messages)
         self.assertEqual(ctx.exception.errors, expected_errors)
 
-    @mock.patch("sqlglot.generator.logger")
+    @mock.patch("hex.sqlglot.generator.logger")
     def test_unsupported_level(self, logger):
         def unsupported(level):
             transpile(

@@ -1757,7 +1757,7 @@ FROM persons AS p, LATERAL FLATTEN(input => p.c, path => 'contact') AS _flattene
         self.assertIsInstance(ilike, exp.ILikeAny)
         like.sql()  # check that this doesn't raise
 
-    @mock.patch("sqlglot.generator.logger")
+    @mock.patch("hex.sqlglot.generator.logger")
     def test_regexp_substr(self, logger):
         self.validate_all(
             "REGEXP_SUBSTR(subject, pattern, pos, occ, params, group)",
@@ -1808,7 +1808,7 @@ FROM persons AS p, LATERAL FLATTEN(input => p.c, path => 'contact') AS _flattene
             },
         )
 
-    @mock.patch("sqlglot.generator.logger")
+    @mock.patch("hex.sqlglot.generator.logger")
     def test_regexp_replace(self, logger):
         self.validate_all(
             "REGEXP_REPLACE(subject, pattern)",

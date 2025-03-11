@@ -1803,7 +1803,7 @@ OPTIONS (
             },
         )
 
-    @mock.patch("sqlglot.dialects.bigquery.logger")
+    @mock.patch("hex.sqlglot.dialects.bigquery.logger")
     def test_pushdown_cte_column_names(self, logger):
         with self.assertRaises(UnsupportedError):
             transpile(

@@ -189,7 +189,7 @@ class TestOptimizer(unittest.TestCase):
                     df2 = self.conn.execute(optimized.sql(dialect="duckdb")).df()
                     assert_frame_equal(df1, df2)
 
-    @patch("sqlglot.generator.logger")
+    @patch("hex.sqlglot.generator.logger")
     def test_optimize(self, logger):
         self.assertEqual(optimizer.optimize("x = 1 + 1", identify=None).sql(), "x = 2")
 
@@ -256,7 +256,7 @@ class TestOptimizer(unittest.TestCase):
 
         self.check_file("normalize", normalize)
 
-    @patch("sqlglot.generator.logger")
+    @patch("hex.sqlglot.generator.logger")
     def test_qualify_columns(self, logger):
         self.assertEqual(
             optimizer.qualify.qualify(
@@ -632,7 +632,7 @@ SELECT :with,WITH :expressions,CTE :this,UNION :this,SELECT :expressions,1,:expr
             pretty=True,
         )
 
-    @patch("sqlglot.generator.logger")
+    @patch("hex.sqlglot.generator.logger")
     def test_merge_subqueries(self, logger):
         optimize = partial(
             optimizer.optimize,
@@ -801,7 +801,7 @@ FROM READ_CSV('tests/fixtures/optimizer/tpc-h/nation.csv.gz', 'delimiter', '|') 
         sql = "UPDATE tbl1 SET col = 0"
         self.assertEqual(len(traverse_scope(parse_one(sql))), 0)
 
-    @patch("sqlglot.optimizer.scope.logger")
+    @patch("hex.sqlglot.optimizer.scope.logger")
     def test_scope_warning(self, logger):
         self.assertEqual(len(traverse_scope(parse_one("WITH q AS (@y) SELECT * FROM q"))), 1)
         assert_logger_contains(
