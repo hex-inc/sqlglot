@@ -1,4 +1,4 @@
-from sqlglot import exp, parse_one, transpile
+from hex.sqlglot import exp, parse_one, transpile
 from tests.dialects.test_dialect import Validator
 
 

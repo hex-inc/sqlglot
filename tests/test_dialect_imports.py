@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from sqlglot.dialects import __getattr__ as dialects_getattr
+from hex.sqlglot.dialects import __getattr__ as dialects_getattr
 
 
 class TestDialectImports(unittest.TestCase):
@@ -12,7 +12,7 @@ class TestDialectImports(unittest.TestCase):
         which could cause a deadlock with a non-reentrant lock.
         """
         # This should complete without hanging
-        from sqlglot.dialects import Athena
+        from hex.sqlglot.dialects import Athena
 
         # Verify it imported successfully
         self.assertIsNotNone(Athena)

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import unittest
 
-import sqlglot
-from sqlglot.lineage import lineage
-from sqlglot.schema import MappingSchema
+import hex.sqlglot as sqlglot
+from hex.sqlglot.lineage import lineage
+from hex.sqlglot.schema import MappingSchema
 
 
 class TestLineage(unittest.TestCase):
