@@ -1,6 +1,6 @@
 import unittest
 
-from sqlglot import (
+from hex.sqlglot import (
     Dialect,
     Dialects,
     ErrorLevel,
@@ -10,9 +10,9 @@ from sqlglot import (
     exp,
     parse_one,
 )
-from sqlglot.dialects import BigQuery, Hive, Snowflake
-from sqlglot.dialects.dialect import Version
-from sqlglot.parser import logger as parser_logger
+from hex.sqlglot.dialects import BigQuery, Hive, Snowflake
+from hex.sqlglot.dialects.dialect import Version
+from hex.sqlglot.parser import logger as parser_logger
 
 
 class Validator(unittest.TestCase):
@@ -95,7 +95,7 @@ class TestDialect(Validator):
     def test_lazy_load(self):
         import subprocess
 
-        code = "import sqlglot; assert len(sqlglot.Dialect._classes) == 1; print('Success')"
+        code = "import hex.sqlglot. assert len(sqlglot.Dialect._classes) == 1; print('Success')"
         result = subprocess.run(["python", "-c", code], capture_output=True, text=True)
         assert "Success" in result.stdout
 
