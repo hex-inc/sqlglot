@@ -1,8 +1,8 @@
 import json
 import unittest
 
-from sqlglot import exp, parse_one
-from sqlglot.optimizer.annotate_types import annotate_types
+from hex.sqlglot import exp, parse_one
+from hex.sqlglot.optimizer.annotate_types import annotate_types
 from tests.helpers import load_sql_fixtures
 
 

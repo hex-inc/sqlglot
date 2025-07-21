@@ -2,7 +2,7 @@ from unittest import mock
 import datetime
 import pytz
 
-from sqlglot import (
+from hex.sqlglot import (
     ErrorLevel,
     ParseError,
     TokenError,
@@ -12,11 +12,11 @@ from sqlglot import (
     transpile,
     parse_one,
 )
-from sqlglot.helper import logger as helper_logger
-from sqlglot.parser import logger as parser_logger
+from hex.sqlglot.helper import logger as helper_logger
+from hex.sqlglot.parser import logger as parser_logger
 from tests.dialects.test_dialect import Validator
-from sqlglot.optimizer.annotate_types import annotate_types
-from sqlglot.optimizer.qualify import qualify
+from hex.sqlglot.optimizer.annotate_types import annotate_types
+from hex.sqlglot.optimizer.qualify import qualify
 
 
 class TestBigQuery(Validator):
@@ -2562,8 +2562,8 @@ OPTIONS (
         qualified = qualify(ast.copy(), dialect="bigquery,normalization_strategy=uppercase")
         self.assertEqual(qualified.sql("bigquery"), "SELECT * FROM `P`.`D`.`T` AS `T`")
 
-        from sqlglot.dialects import BigQuery
-        from sqlglot.dialects.dialect import NormalizationStrategy
+        from hex.sqlglot.dialects import BigQuery
+        from hex.sqlglot.dialects.dialect import NormalizationStrategy
 
         try:
             BigQuery.NORMALIZATION_STRATEGY = NormalizationStrategy.UPPERCASE
