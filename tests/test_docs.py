@@ -2,9 +2,9 @@ import doctest
 import inspect
 import unittest
 
-import sqlglot
-import sqlglot.optimizer
-import sqlglot.transforms
+import hex.sqlglot as sqlglot
+import hex.sqlglot.optimizer
+import hex.sqlglot.transforms
 
 
 def load_tests(loader, tests, ignore):

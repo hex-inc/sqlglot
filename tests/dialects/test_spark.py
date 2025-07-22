@@ -1,7 +1,7 @@
 from unittest import mock
 
-from sqlglot import exp, parse_one
-from sqlglot.dialects.dialect import Dialects
+from hex.sqlglot import exp, parse_one
+from hex.sqlglot.dialects.dialect import Dialects
 from tests.dialects.test_dialect import Validator
 
 
@@ -1026,8 +1026,8 @@ TBLPROPERTIES (
         )
 
     def test_transpile_annotated_exploded_column(self):
-        from sqlglot.optimizer.annotate_types import annotate_types
-        from sqlglot.optimizer.qualify import qualify
+        from hex.sqlglot.optimizer.annotate_types import annotate_types
+        from hex.sqlglot.optimizer.qualify import qualify
 
         for db_prefix in ("", "explode_view."):
             with self.subTest(f"Annotated exploded column with prefix: {db_prefix}."):

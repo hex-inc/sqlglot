@@ -1,5 +1,5 @@
-from sqlglot import exp, transpile
-from sqlglot.errors import ParseError
+from hex.sqlglot import exp, transpile
+from hex.sqlglot.errors import ParseError
 from tests.dialects.test_dialect import Validator
 
 

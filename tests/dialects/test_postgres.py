@@ -1,5 +1,5 @@
-from sqlglot import ParseError, UnsupportedError, exp, transpile
-from sqlglot.helper import logger as helper_logger
+from hex.sqlglot import ParseError, UnsupportedError, exp, transpile
+from hex.sqlglot.helper import logger as helper_logger
 from tests.dialects.test_dialect import Validator
 
 
