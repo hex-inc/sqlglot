@@ -68,7 +68,7 @@ UNESCAPED_SEQUENCES = {
     "\\\\": "\\",
 }
 
-PLUGIN_GROUP_NAME = "sqlglot.dialects"
+PLUGIN_GROUP_NAME = "hex.sqlglot.dialects"
 
 
 class Dialects(str, Enum):
@@ -159,7 +159,7 @@ class _Dialect(type):
 
         # 1. Try standard sqlglot modules first
         if key in DIALECT_MODULE_NAMES:
-            module = importlib.import_module(f"sqlglot.dialects.{key}")
+            module = importlib.import_module(f"hex.sqlglot.dialects.{key}")
             # If module was already imported, the class may not be in _classes
             # Find and register the dialect class from the module
             if key not in cls._classes:
@@ -202,7 +202,7 @@ class _Dialect(type):
         # 3. Try direct import (for backward compatibility)
         # This allows namespace packages or explicit imports to work
         try:
-            importlib.import_module(f"sqlglot.dialects.{key}")
+            importlib.import_module(f"hex.sqlglot.dialects.{key}")
         except ImportError:
             pass
 

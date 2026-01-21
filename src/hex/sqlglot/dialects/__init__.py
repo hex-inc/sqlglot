@@ -120,7 +120,7 @@ def __getattr__(name):
     module_name = MODULE_BY_ATTRIBUTE.get(name)
     if module_name:
         with _import_lock:
-            module = importlib.import_module(f"sqlglot.dialects.{module_name}")
+            module = importlib.import_module(f"hex.sqlglot.dialects.{module_name}")
         return getattr(module, name)
 
     raise AttributeError(f"module {__name__} has no attribute {name}")
