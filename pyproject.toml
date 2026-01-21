@@ -30,9 +30,12 @@ build-backend = "setuptools.build_meta"
 include-package-data = false
 
 [tool.setuptools_scm]
-version_file = "src/hex/sqlglot/_version.py"
+version_file = "hex/sqlglot/_version.py"
 fallback_version = "0.0.0"
 local_scheme = "no-local-version"
+
+[tool.setuptools.packages.find]
+include = ["hex", "hex.*"]
 
 [tool.setuptools.package-data]
 "*" = ["py.typed"]
