@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from sqlglot import Dialect
-from sqlglot.dialects.dialect import Dialect as DialectBase
+from hex.sqlglot import Dialect
+from hex.sqlglot.dialects.dialect import Dialect as DialectBase
 
 
 class FakeDialect(DialectBase):

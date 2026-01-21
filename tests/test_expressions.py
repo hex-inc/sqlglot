@@ -3,7 +3,7 @@ import math
 import sys
 import unittest
 
-from sqlglot import ParseError, alias, exp, parse_one
+from hex.sqlglot import ParseError, alias, exp, parse_one
 
 
 class TestExpressions(unittest.TestCase):

@@ -1,9 +1,9 @@
 from unittest import mock
 
-from sqlglot import ParseError, UnsupportedError, exp, parse_one
-from sqlglot.optimizer.annotate_types import annotate_types
-from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
-from sqlglot.optimizer.qualify_columns import quote_identifiers
+from hex.sqlglot import ParseError, UnsupportedError, exp, parse_one
+from hex.sqlglot.optimizer.annotate_types import annotate_types
+from hex.sqlglot.optimizer.normalize_identifiers import normalize_identifiers
+from hex.sqlglot.optimizer.qualify_columns import quote_identifiers
 from tests.dialects.test_dialect import Validator
 
 

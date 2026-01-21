@@ -1,5 +1,5 @@
-from sqlglot import parse_one, exp
-from sqlglot.optimizer.qualify import qualify
+from hex.sqlglot import parse_one, exp
+from hex.sqlglot.optimizer.qualify import qualify
 from tests.dialects.test_dialect import Validator
 
 

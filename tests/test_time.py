@@ -1,7 +1,7 @@
 import unittest
 import sys
 
-from sqlglot.time import format_time, subsecond_precision
+from hex.sqlglot.time import format_time, subsecond_precision
 
 
 class TestTime(unittest.TestCase):

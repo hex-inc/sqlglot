@@ -2,7 +2,7 @@ import typing as t
 import unittest
 
 
-from sqlglot import (
+from hex.sqlglot import (
     Dialect,
     Dialects,
     ErrorLevel,
@@ -12,10 +12,10 @@ from sqlglot import (
     exp,
     parse_one,
 )
-from sqlglot.dialects import BigQuery, Hive, Snowflake, Spark2
-from sqlglot.dialects.duckdb import WS_CONTROL_CHARS_TO_DUCK
-from sqlglot.generator import logger as generator_logger
-from sqlglot.parser import logger as parser_logger
+from hex.sqlglot.dialects import BigQuery, Hive, Snowflake, Spark2
+from hex.sqlglot.dialects.duckdb import WS_CONTROL_CHARS_TO_DUCK
+from hex.sqlglot.generator import logger as generator_logger
+from hex.sqlglot.parser import logger as parser_logger
 
 
 class Validator(unittest.TestCase):
@@ -119,7 +119,7 @@ class TestDialect(Validator):
     def test_lazy_load(self):
         import subprocess
 
-        code = "import sqlglot; assert len(sqlglot.Dialect._classes) == 1; print('Success')"
+        code = "import hex.sqlglot. assert len(sqlglot.Dialect._classes) == 1; print('Success')"
         result = subprocess.run(["python", "-c", code], capture_output=True, text=True)
         assert "Success" in result.stdout
 

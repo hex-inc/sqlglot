@@ -521,7 +521,7 @@ class TestExasol(Validator):
                     },
                 )
 
-        from sqlglot.dialects.exasol import DATE_UNITS
+        from hex.sqlglot.dialects.exasol import DATE_UNITS
 
         for unit in DATE_UNITS:
             with self.subTest(f"Testing ADD_{unit}S"):

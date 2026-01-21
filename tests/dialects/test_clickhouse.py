@@ -1,12 +1,12 @@
 from datetime import date, datetime, timezone
-from sqlglot import exp, parse_one
-from sqlglot.dialects import ClickHouse
-from sqlglot.expressions import convert
-from sqlglot.helper import logger as helper_logger
-from sqlglot.optimizer import traverse_scope
-from sqlglot.optimizer.qualify_columns import quote_identifiers
+from hex.sqlglot import exp, parse_one
+from hex.sqlglot.dialects import ClickHouse
+from hex.sqlglot.expressions import convert
+from hex.sqlglot.helper import logger as helper_logger
+from hex.sqlglot.optimizer import traverse_scope
+from hex.sqlglot.optimizer.qualify_columns import quote_identifiers
 from tests.dialects.test_dialect import Validator
-from sqlglot.errors import ErrorLevel
+from hex.sqlglot.errors import ErrorLevel
 
 
 class TestClickhouse(Validator):

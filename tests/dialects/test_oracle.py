@@ -1,6 +1,6 @@
-from sqlglot import exp, UnsupportedError, ParseError, parse_one, parse
+from hex.sqlglot import exp, UnsupportedError, ParseError, parse_one, parse
 from tests.dialects.test_dialect import Validator
-from sqlglot.optimizer.qualify import qualify
+from hex.sqlglot.optimizer.qualify import qualify
 
 
 class TestOracle(Validator):
