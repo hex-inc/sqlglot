@@ -28,14 +28,16 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 include-package-data = false
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+namespaces = true
 
 [tool.setuptools_scm]
-version_file = "hex/sqlglot/_version.py"
+version_file = "src/hex/sqlglot/_version.py"
 fallback_version = "0.0.0"
 local_scheme = "no-local-version"
 
-[tool.setuptools.packages.find]
-include = ["hex", "hex.*"]
-
 [tool.setuptools.package-data]
-"*" = ["py.typed"]
+"hex.sqlglot" = ["py.typed"]
