@@ -34,9 +34,5 @@ version_file = "src/hex/sqlglot/_version.py"
 fallback_version = "0.0.0"
 local_scheme = "no-local-version"
 
-[tool.setuptools.packages.find]
-where = ["src"]
-namespaces = true
-
 [tool.setuptools.package-data]
 "*" = ["py.typed"]
