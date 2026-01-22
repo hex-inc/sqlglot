@@ -1,6 +1,6 @@
 import unittest
 
-from sqlglot.errors import highlight_sql, ANSI_UNDERLINE, ANSI_RESET
+from hex.sqlglot.errors import highlight_sql, ANSI_UNDERLINE, ANSI_RESET
 
 
 class TestErrors(unittest.TestCase):

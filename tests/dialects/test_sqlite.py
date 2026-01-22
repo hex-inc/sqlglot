@@ -1,6 +1,6 @@
 from tests.dialects.test_dialect import Validator
 
-from sqlglot.helper import logger as helper_logger
+from hex.sqlglot.helper import logger as helper_logger
 
 
 class TestSQLite(Validator):

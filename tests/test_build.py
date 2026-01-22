@@ -1,6 +1,6 @@
 import unittest
 
-from sqlglot import (
+from hex.sqlglot import (
     alias,
     and_,
     case,

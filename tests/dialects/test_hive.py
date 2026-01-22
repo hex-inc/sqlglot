@@ -1,5 +1,5 @@
 from tests.dialects.test_dialect import Validator
-from sqlglot import exp
+from hex.sqlglot import exp
 
 
 class TestHive(Validator):
